@@ -19,6 +19,17 @@
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 
+## 从源码运行
+
+需要 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。桌面界面使用 Avalonia；首次构建需要还原 NuGet 依赖。
+
+```sh
+dotnet run --project tests/Scribe.Tests -c Release
+dotnet run --project src/Scribe.Desktop -c Release
+```
+
+核心解析与导出位于 `src/Scribe.Core`，桌面界面位于 `src/Scribe.Desktop`，自动化测试位于 `tests/Scribe.Tests`。`samples` 提供小说和剧本样稿。Windows 可运行 `build-windows.ps1` 生成自包含程序；Apple Silicon Mac 可运行 `bash build-macos.sh` 生成 `.app` 和 ZIP。Mac 脚本只做本地 ad-hoc 签名，正式分发仍需 Developer ID 签名和公证。详细使用和已验证范围见[验证记录](验证记录.md)。
+
 ## 开源协议
 
-句幕采用 [MIT License](LICENSE)。使用、修改或再发布时请保留版权及协议声明；第三方依赖仍遵循各自的协议。
+句幕源码采用 [MIT License](LICENSE)。使用、修改或再发布时请保留版权及协议声明；第三方组件见[许可说明](THIRD-PARTY-NOTICES.md)。

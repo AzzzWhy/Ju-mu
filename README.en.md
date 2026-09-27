@@ -19,6 +19,17 @@ Import or paste a manuscript → choose a mode and parse → review the results 
 
 Jumu relies on offline rules and **cannot understand every narrative context**. Complex quotations, omitted speakers, and branch content still need human review. It does not generate sprites, backgrounds, audio, or other presentation assets.
 
+## Build from source
+
+Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). The desktop app uses Avalonia; the first build restores its NuGet dependencies.
+
+```sh
+dotnet run --project tests/Scribe.Tests -c Release
+dotnet run --project src/Scribe.Desktop -c Release
+```
+
+The parser and exporter live in `src/Scribe.Core`, the UI in `src/Scribe.Desktop`, and automated tests in `tests/Scribe.Tests`. Sample novel and script inputs are in `samples`. Run `build-windows.ps1` on Windows for a self-contained executable, or `bash build-macos.sh` on Apple Silicon macOS for an `.app` and ZIP. The Mac script only applies a local ad-hoc signature; public distribution still requires Developer ID signing and notarization. See the [verification notes](验证记录.md) for tested scope.
+
 ## License
 
-Jumu is licensed under the [MIT License](LICENSE). Keep the copyright and license notices when using, modifying, or redistributing it. Third-party dependencies remain subject to their own licenses.
+Jumu's source code is licensed under the [MIT License](LICENSE). Keep the copyright and license notices when using, modifying, or redistributing it. See the [third-party notices](THIRD-PARTY-NOTICES.md) for dependencies.

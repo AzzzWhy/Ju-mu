@@ -1,0 +1,18 @@
+<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="Scribe.Desktop.App" RequestedThemeVariant="Light">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window"><Setter Property="FontFamily" Value="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Segoe UI"/><Setter Property="Foreground" Value="#203C38"/><Setter Property="Background" Value="#F3F5F1"/></Style>
+    <Style Selector="Button"><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="14,9"/><Setter Property="Cursor" Value="Hand"/></Style>
+    <Style Selector="Button.primary"><Setter Property="Background" Value="#236752"/><Setter Property="Foreground" Value="White"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="#184D3E"/><Setter Property="Foreground" Value="White"/></Style>
+    <Style Selector="Button.soft"><Setter Property="Background" Value="#E6EEE7"/><Setter Property="Foreground" Value="#236752"/></Style>
+    <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#6E8079"/><Setter Property="FontSize" Value="12"/></Style>
+    <Style Selector="TextBlock.caption"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    <Style Selector="TextBox"><Setter Property="CornerRadius" Value="7"/><Setter Property="BorderBrush" Value="#D5DFD7"/><Setter Property="SelectionBrush" Value="#B9DCCA"/></Style>
+    <Style Selector="ComboBox"><Setter Property="CornerRadius" Value="7"/><Setter Property="BorderBrush" Value="#D5DFD7"/></Style>
+    <Style Selector="Border.panel"><Setter Property="Background" Value="White"/><Setter Property="CornerRadius" Value="12"/><Setter Property="BorderBrush" Value="#DEE6DD"/><Setter Property="BorderThickness" Value="1"/></Style>
+    <Style Selector="ListBoxItem"><Setter Property="Padding" Value="4"/><Setter Property="Margin" Value="0,0,0,5"/><Setter Property="CornerRadius" Value="8"/></Style>
+    <Style Selector="ListBoxItem:selected /template/ ContentPresenter"><Setter Property="Background" Value="#E2EFE7"/></Style>
+    <Style Selector="ToolTip"><Setter Property="MaxWidth" Value="350"/></Style>
+  </Application.Styles>
+</Application>
