@@ -1,0 +1,25 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags:
+      - v0.3.2
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish Windows ZIP and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            'packages/Jumu-0.3.2-win-x64.zip#Jumu 0.3.2 for Windows x64' \
+            'packages/SHA256SUMS.txt#SHA-256 checksums' \
+            --title '句幕 Jumu 0.3.2' \
+            --notes 'Windows x64: extract the ZIP and run RenpyScribe.exe. The archive passed integrity checks and the application was cross-built, but it has not yet been run on a physical Windows machine.' \
+            --verify-tag
