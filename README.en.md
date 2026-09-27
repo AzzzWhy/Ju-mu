@@ -17,7 +17,7 @@ Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, o
 
 Import or paste a manuscript → choose a mode and parse → review the results and choice trees → export the `.rpy` file. Place it in your Ren’Py project’s `game` folder and `call` the exported label from your existing entry point.
 
-Windows x64 package: [Download Jumu 0.3.2](packages/Jumu-0.3.2-win-x64.zip), extract it, and run `RenpyScribe.exe`. Verify the file against [SHA256SUMS.txt](packages/SHA256SUMS.txt). This build has not yet been tested on a physical Windows machine.
+Windows x64 package: [Download Jumu 0.3.2 from Releases](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.2/Jumu-0.3.2-win-x64.zip), extract it, and run `RenpyScribe.exe`. Verify the file against [SHA256SUMS.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.2/SHA256SUMS.txt). This build has not yet been tested on a physical Windows machine.
 
 Jumu relies on offline rules and **cannot understand every narrative context**. Complex quotations, omitted speakers, and branch content still need human review. It does not generate sprites, backgrounds, audio, or other presentation assets.
 
