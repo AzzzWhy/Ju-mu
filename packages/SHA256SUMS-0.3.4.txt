@@ -1,0 +1,2 @@
+8ae56bb4c0a9ba01775ae94d64b203b425a0541977e1574d83ad4d7295597623  Jumu-0.3.4-win-x64.zip
+bbbbc8acfa748b9ffa6e9a32427c8fcfe00ecc3142b6ab24b92bebfb3b267e27  Jumu-0.3.4-mac-arm64.zip

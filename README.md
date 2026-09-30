@@ -18,7 +18,7 @@
 
 导入或粘贴稿件 → 选择模式并解析 → 审核识别结果与选项树 → 导出 `.rpy`，将其放入 Ren’Py 项目的 `game` 文件夹，再从现有入口 `call` 导出的 label。
 
-Windows x64 压缩包：[下载 Jumu 0.3.3](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.3/Jumu-0.3.3-win-x64.zip)（解压后运行 `Jumu.exe`）。校验值见 [SHA256SUMS-0.3.3.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.3/SHA256SUMS-0.3.3.txt)。该版本已完成跨平台构建，但尚未在真实 Windows 电脑上实机验证。
+Windows x64 压缩包：[下载 Jumu 0.3.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/Jumu-0.3.4-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.3.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/Jumu-0.3.4-mac-arm64.zip)。校验值见 [SHA256SUMS-0.3.4.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/SHA256SUMS-0.3.4.txt)。Windows 版尚未在真实 Windows 电脑上实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 
