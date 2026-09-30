@@ -300,16 +300,63 @@ Test("导出：恶意引号换行保持在字符串内", () =>
     True(!script.Split('\n').Any(x => x.StartsWith("label injected:", StringComparison.Ordinal)), "原文不能插入执行语句");
     Contains("\\nlabel\\ injected:", script);
 });
-Test("导出：角色名作为文本，变量须显式映射", () =>
+Test("导出：自动生成对话人代号，旁白使用 s，手动映射优先", () =>
 {
     var item = new Segment { Kind = SegmentKind.Dialogue, Speaker = "小明", Text = "你好。" };
-    var script = RenpyExporter.Generate([item], new ExportOptions());
-    Contains("\"小明\"", script);
-    var mapped = RenpyExporter.Generate([item], new ExportOptions
+    var script = RenpyExporter.Generate([Narration("开场。"), item, item], new ExportOptions());
+    Contains("define s = Character(None)", script);
+    Contains("define 小明 = Character(\"小明\")", script);
+    Contains("s \"开场。\"", script);
+    Contains("小明 \"你好。\"", script);
+    Equal(1, script.Split("define 小明 = Character", StringSplitOptions.None).Length - 1);
+    var mapped = RenpyExporter.Generate([Narration("旁白。"), item], new ExportOptions
     {
         CharacterVariables = new Dictionary<string, string> { ["小明"] = "ming" }
     });
     Contains("ming \"你好。\"", mapped);
+    True(!mapped.Contains("define 小明 =", StringComparison.Ordinal), "已有角色变量不应被重复定义");
+    UserError(() => RenpyExporter.Generate([item], new ExportOptions
+    {
+        CharacterVariables = new Dictionary<string, string> { ["小明"] = "s" }
+    }));
+});
+Test("导出：复杂姓名安全转为代号，选项分支中的人物也自动定义", () =>
+{
+    var anchor = Narration("抉择。");
+    var tree = new ChoiceTree { AnchorSegmentId = anchor.Id, Branches = [
+        new ChoiceBranch { Label = "继续", Items = [
+            new ChoiceItem { Segment = new Segment { Kind = SegmentKind.Dialogue, Speaker = "Dr. Smith", Text = "Hello." } },
+            new ChoiceItem { Segment = new Segment { Kind = SegmentKind.Dialogue, Speaker = "s", Text = "I am s." } },
+            new ChoiceItem { Segment = new Segment { Kind = SegmentKind.Dialogue, Speaker = "return", Text = "Reserved." } }
+        ] }
+    ] };
+    var script = RenpyExporter.Generate([anchor], new ExportOptions(), [tree]);
+    Contains("define Dr_Smith = Character(\"Dr.\\ Smith\")", script);
+    Contains("define s_2 = Character(\"s\")", script);
+    Contains("define return_2 = Character(\"return\")", script);
+    Contains("Dr_Smith \"Hello.\"", script);
+    Contains("s_2 \"I\\ am\\ s.\"", script);
+    Contains("return_2 \"Reserved.\"", script);
+});
+Test("导出：未确定说话人的对白用 s 且继续提示人工确认", () =>
+{
+    var script = RenpyExporter.Generate([new Segment { Kind = SegmentKind.Dialogue, Text = "是谁？", Paragraph = 3 }], new ExportOptions());
+    Contains("# 待确认：原文第 3 段的说话人未确定。", script);
+    Contains("s \"是谁？\"", script);
+});
+Test("导出：角色代号冲突自动编号，恶意姓名不能插入脚本", () =>
+{
+    var script = RenpyExporter.Generate([
+        new Segment { Kind = SegmentKind.Dialogue, Speaker = "Dr. Smith", Text = "A" },
+        new Segment { Kind = SegmentKind.Dialogue, Speaker = "Dr-Smith", Text = "B" },
+        new Segment { Kind = SegmentKind.Dialogue, Speaker = "narrator", Text = "C" },
+        new Segment { Kind = SegmentKind.Dialogue, Speaker = "Eve\")\nlabel injected:\n    $ malicious()", Text = "D" }
+    ], new ExportOptions());
+    Contains("define Dr_Smith =", script);
+    Contains("define Dr_Smith_2 =", script);
+    Contains("define narrator_2 =", script);
+    True(!script.Split('\n').Any(line => line.StartsWith("label injected:", StringComparison.Ordinal)), "角色名不能插入 label");
+    Contains("Eve_", script);
 });
 Test("导出：拒绝非法 label 和变量", () =>
 {

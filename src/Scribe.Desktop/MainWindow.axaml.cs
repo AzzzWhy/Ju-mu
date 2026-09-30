@@ -661,7 +661,7 @@ public partial class MainWindow : Window
         body.Children.Add(new TextBlock { Text = "角色别名（每行：别名=正式名）", FontWeight = FontWeight.SemiBold }); body.Children.Add(aliases);
         body.Children.Add(new TextBlock { Text = "别名也可以帮助识别短角色名；修改后需重新解析。", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         body.Children.Add(new TextBlock { Text = "已有 Ren’Py 角色变量（可选，每行：正式名=变量）", FontWeight = FontWeight.SemiBold }); body.Children.Add(variables);
-        body.Children.Add(new TextBlock { Text = "映射的变量需在 Ren’Py 项目中先行定义。留空则直接显示角色名。", TextWrapping = TextWrapping.Wrap, FontSize = 12 }); body.Children.Add(comments);
+        body.Children.Add(new TextBlock { Text = "映射的变量需在 Ren’Py 项目中先行定义。留空则自动生成角色变量：有效姓名直接作代号，复杂姓名会转为安全代号；无说话人的句子使用 s。", TextWrapping = TextWrapping.Wrap, FontSize = 12 }); body.Children.Add(comments);
         if (!await CustomDialog("角色与导出设置", body, "应用设置", "取消", 580)) return;
         static Dictionary<string, string> Map(string? value)
         {

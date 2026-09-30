@@ -11,6 +11,7 @@
 - **两种导入模式：**小说正文和剧本，支持按段落、句子或阅读长度拆分。
 - **可选自动识别：**默认不推断对白和说话人；勾选「自动识别对白与角色」后才启用规则识别。
 - **人工校正：**修改内容类型、说话人和正文；支持快捷人物姓名、拖动多选、批量确认，以及单句上移、下移和删除。删除句子时，其所附选项树也会删除；原始稿件保留不变。
+- **自动角色代号：**导出时为说话人自动生成 `Character` 定义；有效姓名直接作为代号，复杂姓名安全转换，无说话人的句子使用 `s`。已有角色变量映射仍优先使用。导入现有 Ren’Py 工程前，请检查自动代号是否与工程中已有变量冲突。
 - **可视化分支：**添加、移动、删除选项，并在选项树中组织嵌套分支。
 - **本地工作流：**保存 `.jumu` 工程供后续编辑，导出独立的 Ren’Py `.rpy` 脚本；文本处理无需联网。
 
@@ -18,7 +19,7 @@
 
 导入或粘贴稿件 → 选择模式并解析 → 审核识别结果与选项树 → 导出 `.rpy`，将其放入 Ren’Py 项目的 `game` 文件夹，再从现有入口 `call` 导出的 label。
 
-Windows x64 压缩包：[下载 Jumu 0.3.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/Jumu-0.3.4-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.3.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/Jumu-0.3.4-mac-arm64.zip)。校验值见 [SHA256SUMS-0.3.4.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.4/SHA256SUMS-0.3.4.txt)。Windows 版尚未在真实 Windows 电脑上实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
+Windows x64 压缩包：[下载 Jumu 0.3.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/Jumu-0.3.5-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.3.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/Jumu-0.3.5-mac-arm64.zip)。校验值见 [SHA256SUMS-0.3.5.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/SHA256SUMS-0.3.5.txt)。Windows 版尚未在真实 Windows 电脑上实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 
