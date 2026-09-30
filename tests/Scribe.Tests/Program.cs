@@ -30,6 +30,46 @@ Test("默认旁白：工程保存后保留分类设置", () =>
     True(!loaded.Options.AutoDetectKinds, "重新打开工程仍应采用默认旁白分类");
 });
 
+Test("逐句顺序：移动句子时前后选项树跟随，保存后仍可导出", () =>
+{
+    var first = Narration("第一句。");
+    var second = Narration("第二句。");
+    var third = Narration("第三句。");
+    var project = new ProjectDocument { SourceText = "第一句。第二句。第三句。", Segments = [first, second, third] };
+    ChoiceTreeEditor.AddQuickChoice(project, "句前选项", second.Id, ChoicePlacement.Before);
+    ChoiceTreeEditor.AddQuickChoice(project, "句后选项", second.Id, ChoicePlacement.After);
+    True(SegmentListEditor.Move(project, second.Id, 1), "中间句应能下移");
+    Equal("第一句。,第三句。,第二句。", string.Join(',', project.Segments.Select(s => s.Text)));
+    InOrder(RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees),
+        "第一句。", "第三句。", "句前选项", "第二句。", "句后选项");
+    var path = PathFor("reordered.jumu");
+    ProjectStorage.Save(path, project);
+    var loaded = ProjectStorage.Load(path);
+    Equal(second.Id, loaded.Segments[^1].Id);
+    Equal(2, loaded.ChoiceTrees.Count(tree => tree.AnchorSegmentId == second.Id));
+    True(!SegmentListEditor.Move(loaded, second.Id, 1), "末句不能继续下移");
+    True(SegmentListEditor.Move(loaded, second.Id, -1), "末句应能上移");
+});
+
+Test("逐句顺序：删除句子仅清理其关联选项树并保留原稿", () =>
+{
+    var first = Narration("第一句。");
+    var second = Narration("第二句。");
+    var third = Narration("第三句。");
+    var project = new ProjectDocument { SourceText = "第一句。第二句。第三句。", Segments = [first, second, third] };
+    ChoiceTreeEditor.AddQuickChoice(project, "删除的分支", second.Id);
+    ChoiceTreeEditor.AddQuickChoice(project, "保留的分支", third.Id);
+    Equal(1, SegmentListEditor.Delete(project, second.Id));
+    Equal("第一句。第二句。第三句。", project.SourceText);
+    Equal("第一句。,第三句。", string.Join(',', project.Segments.Select(s => s.Text)));
+    Equal(1, project.ChoiceTrees.Count);
+    Equal(third.Id, project.ChoiceTrees.Single().AnchorSegmentId);
+    var script = RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees);
+    True(!script.Contains("第二句。", StringComparison.Ordinal) && !script.Contains("删除的分支", StringComparison.Ordinal), "删除的句子与分支不应导出");
+    InOrder(script, "第一句。", "第三句。", "保留的分支");
+    UserError(() => SegmentListEditor.Delete(project, second.Id));
+});
+
 Test("剧本：中文全角冒号和英文半角冒号", () =>
 {
     var result = Parse("小明：你好。\nAlice: Hello.");

@@ -50,6 +50,9 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         });
         On("SplitButton", SplitAsync); On("MergeButton", MergeAsync);
+        On("MoveUpButton", () => MoveSegmentAsync(-1));
+        On("MoveDownButton", () => MoveSegmentAsync(1));
+        On("DeleteSegmentButton", DeleteSegmentAsync);
         On("UndoButton", UndoAsync);
         On("SelectVisibleButton", SelectVisibleAsync); On("ReviewSelectedButton", ReviewSelectedAsync);
         On("ClearSelectionButton", ClearSelectionAsync);
@@ -63,6 +66,21 @@ public partial class MainWindow : Window
         Rows.AddHandler(InputElement.PointerPressedEvent, DragPointerPressed, RoutingStrategies.Tunnel);
         Rows.AddHandler(InputElement.PointerMovedEvent, DragPointerMoved, RoutingStrategies.Tunnel);
         Rows.AddHandler(InputElement.PointerReleasedEvent, DragPointerReleased, RoutingStrategies.Tunnel);
+        AddHandler(InputElement.KeyDownEvent, async (_, e) =>
+        {
+            if (e.Source is Visual source && source.GetVisualAncestors().Prepend(source)
+                .Any(visual => visual is TextBox or ComboBox or NumericUpDown)) return;
+            Func<Task>? action = e.Key switch
+            {
+                Key.Delete when e.KeyModifiers == KeyModifiers.None => DeleteSegmentAsync,
+                Key.Up when e.KeyModifiers == KeyModifiers.Alt => () => MoveSegmentAsync(-1),
+                Key.Down when e.KeyModifiers == KeyModifiers.Alt => () => MoveSegmentAsync(1),
+                _ => null
+            };
+            if (action is null) return;
+            e.Handled = true;
+            await Safe(action);
+        }, RoutingStrategies.Tunnel);
         C<TextBox>("SearchBox").TextChanged += (_, _) => { if (!_loading) { CommitEditor(); Refresh(_selected?.Id); } };
         C<CheckBox>("PendingOnly").IsCheckedChanged += (_, _) => { if (!_loading) { CommitEditor(); Refresh(_selected?.Id); } };
         C<RadioButton>("NovelMode").IsCheckedChanged += (_, _) => OptionsChanged();
@@ -130,6 +148,7 @@ public partial class MainWindow : Window
         if (_refreshing || e.Pointer.Type != PointerType.Mouse || !e.GetCurrentPoint(Rows).Properties.IsLeftButtonPressed) return;
         _dragAnchor = HitRow(e);
         if (_dragAnchor < 0) return;
+        Rows.Focus();
         _dragStart = e.GetPosition(Rows);
         _dragSelecting = false;
         _dragBase = Rows.SelectedItems?.OfType<Segment>().ToHashSet() ?? [];
@@ -432,6 +451,12 @@ public partial class MainWindow : Window
         if (_selected is null || !_editorTargets.Contains(_selected)) _selected = _editorTargets.LastOrDefault();
         _editorSnapshot = new SegmentEditSnapshot(_selected?.Text ?? "", _selected?.Speaker ?? "", _selected?.Kind ?? SegmentKind.Narration, _selected?.Include ?? true);
         C<StackPanel>("EditorPanel").IsEnabled = _selected != null;
+        var single = _editorTargets.Count == 1;
+        var index = _selected is null ? -1 : _project.Segments.IndexOf(_selected);
+        var unfiltered = string.IsNullOrWhiteSpace(C<TextBox>("SearchBox").Text) && C<CheckBox>("PendingOnly").IsChecked != true;
+        C<Button>("MoveUpButton").IsEnabled = single && unfiltered && index > 0;
+        C<Button>("MoveDownButton").IsEnabled = single && unfiltered && index >= 0 && index < _project.Segments.Count - 1;
+        C<Button>("DeleteSegmentButton").IsEnabled = single;
         C<TextBox>("DialogueBox").Text = _selected?.Text ?? "";
         C<TextBox>("SpeakerBox").Text = _selected?.Speaker ?? "";
         C<ComboBox>("KindChoice").SelectedIndex = (int)(_selected?.Kind ?? SegmentKind.Narration);
@@ -499,6 +524,44 @@ public partial class MainWindow : Window
         if (_selected.Source != next.Source) _selected.Source += "\n" + next.Source;
         _selected.Warnings = _selected.Warnings.Concat(next.Warnings).Distinct().ToList(); _selected.Reviewed = false;
         _project.Segments.RemoveAt(i + 1); _dirty = true; _manualEdits = true; Refresh(_selected.Id); SetStatus("已合并下一条，可继续编辑。");
+    }
+
+    private Task MoveSegmentAsync(int direction)
+    {
+        if (_selected is null || Rows.SelectedItems?.Count != 1)
+            throw new UserFacingException("请先只选中一句，再移动它。");
+        if (!string.IsNullOrWhiteSpace(C<TextBox>("SearchBox").Text) || C<CheckBox>("PendingOnly").IsChecked == true)
+            throw new UserFacingException("移动句子前请先清除搜索和「待确认」筛选，以便看清完整顺序。");
+        CommitEditor();
+        var sentence = _selected;
+        var index = _project.Segments.IndexOf(sentence);
+        if (index < 0 || index + direction < 0 || index + direction >= _project.Segments.Count)
+            return Task.CompletedTask;
+        PushUndo();
+        SegmentListEditor.Move(_project, sentence.Id, direction);
+        _dirty = true; _manualEdits = true;
+        Refresh(sentence.Id);
+        SetStatus($"已将句子移到第 {_project.Segments.IndexOf(sentence) + 1} 条；关联选项树随句子移动。可点击「撤销」恢复。");
+        return Task.CompletedTask;
+    }
+
+    private async Task DeleteSegmentAsync()
+    {
+        if (_selected is null || Rows.SelectedItems?.Count != 1)
+            throw new UserFacingException("请先只选中一句，再删除它。");
+        CommitEditor();
+        var sentence = _selected;
+        var index = _project.Segments.IndexOf(sentence);
+        if (index < 0) throw new UserFacingException("要删除的句子已不存在，请重新选择。");
+        var attachedTrees = _project.ChoiceTrees.Count(tree => tree.AnchorSegmentId == sentence.Id);
+        var warning = attachedTrees > 0 ? $"\n\n这句还关联 {attachedTrees} 棵选项树；确认后将连同这些选项树一起删除。" : "";
+        if (!await Dialog("删除句子？", $"将从识别结果中删除第 {index + 1} 句。原始稿件不会改动，重新解析会恢复这句；也可以点击「撤销」。{warning}", "删除句子", "取消")) return;
+        PushUndo();
+        var nextId = _project.Segments.Skip(index + 1).FirstOrDefault()?.Id ?? _project.Segments.Take(index).LastOrDefault()?.Id;
+        var removedTrees = SegmentListEditor.Delete(_project, sentence.Id);
+        _dirty = true; _manualEdits = true; _selected = null; _editorTargets = [];
+        Refresh(nextId);
+        SetStatus($"已删除第 {index + 1} 句" + (removedTrees > 0 ? $"及关联的 {removedTrees} 棵选项树" : "") + "。可点击「撤销」恢复。");
     }
 
     private Task QuickAddChoiceAsync()
@@ -632,7 +695,7 @@ public partial class MainWindow : Window
         _projectPath = null; _dirty = true; _manualEdits = false; _undo.Clear(); _selected = null; SetProjectControls(); await ParseAsync();
     }
 
-    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹，在已有 start 中 call 对应 label。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；不会自动创建变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
+    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。只选中一句时，右侧可上移、下移或删除；焦点在句子列表时也可用 Alt+↑ / Alt+↓ / Delete。关联选项树随移动句子一起移动；删除前会确认。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹，在已有 start 中 call 对应 label。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；不会自动创建变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
 
     private Task<bool> Dialog(string title, string text, string accept, string? cancel = null) => CustomDialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 24 }, accept, cancel);
     private async Task<bool> CustomDialog(string title, Control body, string accept, string? cancel, double width = 540)

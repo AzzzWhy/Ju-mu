@@ -10,7 +10,7 @@ Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, o
 
 - **Two import modes:** Novel and Script, with paragraph, sentence, or reading-length splitting.
 - **Optional auto-detection:** Dialogue and speakers are not inferred by default; enable them with the “自动识别对白与角色” checkbox.
-- **Human-in-the-loop editing:** Correct line type, speaker, and text; use speaker shortcuts, drag-to-select, and batch review.
+- **Human-in-the-loop editing:** Correct line type, speaker, and text; use speaker shortcuts, drag-to-select, batch review, and move or delete individual lines. Deleting a line also removes choice trees attached to it; the original manuscript stays intact.
 - **Visual branching:** Add, move, and delete choices, including nested branches.
 - **Local workflow:** Save an editable `.jumu` project and export a standalone Ren’Py `.rpy` script. Manuscript processing does not require an internet connection.
 
