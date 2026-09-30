@@ -5,10 +5,11 @@
   <key>CFBundleIdentifier</key><string>local.renpyscribe.jumu</string>
   <key>CFBundleName</key><string>句幕</string>
   <key>CFBundleDisplayName</key><string>句幕</string>
-  <key>CFBundleExecutable</key><string>RenpyScribe</string>
+  <key>CFBundleExecutable</key><string>Jumu</string>
+  <key>CFBundleIconFile</key><string>Jumu.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.3.2</string>
-  <key>CFBundleVersion</key><string>5</string>
+  <key>CFBundleShortVersionString</key><string>0.3.3</string>
+  <key>CFBundleVersion</key><string>6</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict>

@@ -46,6 +46,15 @@ public static class ManuscriptParser
             return result;
         }
         var paragraphs = GetParagraphs(text);
+        if (!options.AutoDetectKinds)
+        {
+            foreach (var paragraph in paragraphs)
+            {
+                var warnings = paragraph.Warnings.Concat(ScanQuotes(paragraph.Text).Warnings).Distinct();
+                Emit(paragraph.Text, SegmentKind.Narration, "", paragraph, options, result, warnings);
+            }
+            return result;
+        }
         string? continuationSpeaker = null;
         foreach (var paragraph in paragraphs)
         {

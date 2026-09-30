@@ -37,6 +37,9 @@ public static class ProjectStorage
                 throw new UserFacingException("文件缺少工程版本或必要数据。请选择本程序保存的工程文件。");
             var project = json.RootElement.Deserialize<ProjectDocument>(JsonOptions);
             if (project is null) throw new UserFacingException("工程为空或格式不正确。");
+            if (project.Options is { } parseOptions && json.RootElement.GetProperty("Options").ValueKind == JsonValueKind.Object &&
+                !json.RootElement.GetProperty("Options").TryGetProperty("AutoDetectKinds", out _))
+                parseOptions.AutoDetectKinds = true;
             Validate(project);
             project.Options.Aliases = new Dictionary<string, string>(project.Options.Aliases, StringComparer.OrdinalIgnoreCase);
             project.Export.CharacterVariables = new Dictionary<string, string>(project.Export.CharacterVariables, StringComparer.OrdinalIgnoreCase);

@@ -1,10 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="Scribe.Desktop.MainWindow"
-        Title="句幕 · Ren’Py 剧本导入器" Width="1440" Height="940" MinWidth="1120" MinHeight="740" WindowStartupLocation="CenterScreen">
+        Title="句幕 · Ren’Py 剧本导入器" Icon="/Assets/Jumu.png" Width="1440" Height="940" MinWidth="1120" MinHeight="740" WindowStartupLocation="CenterScreen">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20,24,14">
     <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,20">
       <StackPanel Orientation="Horizontal" Spacing="14">
         <Border Background="#236752" CornerRadius="12" Width="48" Height="48"><TextBlock Text="幕" Foreground="White" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-        <StackPanel Spacing="2"><TextBlock Text="句幕" FontSize="24" FontWeight="Bold"/><TextBlock Text="REN’PY SCRIPT IMPORTER  /  0.3.2" Classes="muted" FontSize="10" LetterSpacing="1.4"/></StackPanel>
+        <StackPanel Spacing="2"><TextBlock Text="句幕" FontSize="24" FontWeight="Bold"/><TextBlock Text="REN’PY SCRIPT IMPORTER  /  0.3.3" Classes="muted" FontSize="10" LetterSpacing="1.4"/></StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
         <Button Name="HelpButton" Content="使用说明"/>
@@ -32,7 +32,10 @@
           <ComboBox Grid.Column="1" Name="SplitChoice" Width="132" SelectedIndex="1" Margin="0,0,10,0"><ComboBoxItem Content="保留原段落"/><ComboBoxItem Content="按句子拆分"/><ComboBoxItem Content="按阅读长度"/></ComboBox>
           <TextBlock Grid.Column="2" Text="建议字数" Classes="muted" VerticalAlignment="Center" Margin="0,0,8,0"/>
           <NumericUpDown Grid.Column="3" Name="LengthInput" Value="80" Minimum="20" Maximum="500" Increment="10" Width="120" FormatString="0" ShowButtonSpinner="False" TextAlignment="Center"/>
-          <TextBlock Grid.Column="4" Name="ModeHint" Text="结合引号与说话动作，分离对白和旁白" Classes="muted" VerticalAlignment="Center" Margin="18,0,8,0"/>
+          <StackPanel Grid.Column="4" Margin="18,0,8,0" VerticalAlignment="Center" Spacing="2">
+            <CheckBox Name="AutoDetectCheck" Content="自动识别对白与角色" IsChecked="False" FontSize="12"/>
+            <TextBlock Name="ModeHint" Text="默认：旁白/人物动作或其他" Classes="muted" FontSize="10"/>
+          </StackPanel>
           <Button Grid.Column="5" Name="ParseButton" Content="解析文本 →" Classes="primary" HorizontalAlignment="Right"/>
         </Grid>
       </Grid>

@@ -69,6 +69,7 @@ public partial class MainWindow : Window
         C<RadioButton>("ScriptMode").IsCheckedChanged += (_, _) => OptionsChanged();
         C<ComboBox>("SplitChoice").SelectionChanged += (_, _) => OptionsChanged();
         C<NumericUpDown>("LengthInput").ValueChanged += (_, _) => OptionsChanged();
+        C<CheckBox>("AutoDetectCheck").IsCheckedChanged += (_, _) => OptionsChanged();
         C<ComboBox>("KindChoice").SelectionChanged += (_, _) =>
         {
             var dialogue = C<ComboBox>("KindChoice").SelectedIndex == 1;
@@ -264,16 +265,24 @@ public partial class MainWindow : Window
         Mode = C<RadioButton>("ScriptMode").IsChecked == true ? ImportMode.Script : ImportMode.Novel,
         Split = (SplitMode)Math.Max(0, C<ComboBox>("SplitChoice").SelectedIndex),
         MaxLength = (int)(C<NumericUpDown>("LengthInput").Value ?? 80),
+        AutoDetectKinds = C<CheckBox>("AutoDetectCheck").IsChecked == true,
         Aliases = new Dictionary<string, string>(_project.Options.Aliases, StringComparer.OrdinalIgnoreCase)
     };
 
     private void OptionsChanged()
     {
         if (_loading) return;
-        C<TextBlock>("ModeHint").Text = C<RadioButton>("ScriptMode").IsChecked == true ? "优先识别角色名、台词与舞台说明" : "结合引号与说话动作，分离对白和旁白";
+        UpdateModeHint();
         if (string.IsNullOrWhiteSpace(Source.Text)) return;
         _sourceStale = true; _dirty = true;
         SetStatus("解析设置已修改，点击「解析文本」应用。重新解析前会提示已有校正。");
+    }
+
+    private void UpdateModeHint()
+    {
+        C<TextBlock>("ModeHint").Text = C<CheckBox>("AutoDetectCheck").IsChecked == true
+            ? (C<RadioButton>("ScriptMode").IsChecked == true ? "识别角色名、台词与舞台说明" : "结合引号与说话动作识别对白")
+            : "默认：旁白/人物动作或其他";
     }
 
     private void PushUndo()
@@ -329,6 +338,8 @@ public partial class MainWindow : Window
         C<RadioButton>("ScriptMode").IsChecked = _project.Options.Mode == ImportMode.Script;
         C<ComboBox>("SplitChoice").SelectedIndex = (int)_project.Options.Split;
         C<NumericUpDown>("LengthInput").Value = Math.Clamp(_project.Options.MaxLength, 20, 500);
+        C<CheckBox>("AutoDetectCheck").IsChecked = _project.Options.AutoDetectKinds;
+        UpdateModeHint();
         C<TextBlock>("FileNameText").Text = string.IsNullOrWhiteSpace(_project.SourceFile) ? "粘贴的稿件" : Path.GetFileName(_project.SourceFile);
         C<TextBlock>("SourceCount").Text = $"{_project.SourceText.Length:N0} 字";
         C<TextBlock>("SourceHint").Text = "原文可编辑 · 修改后点击「解析文本」";
@@ -621,7 +632,7 @@ public partial class MainWindow : Window
         _projectPath = null; _dirty = true; _manualEdits = false; _undo.Clear(); _selected = null; SetProjectControls(); await ParseAsync();
     }
 
-    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹，在已有 start 中 call 对应 label。\n\n小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；不会自动创建变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
+    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹，在已有 start 中 call 对应 label。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；不会自动创建变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
 
     private Task<bool> Dialog(string title, string text, string accept, string? cancel = null) => CustomDialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 24 }, accept, cancel);
     private async Task<bool> CustomDialog(string title, Control body, string accept, string? cancel, double width = 540)

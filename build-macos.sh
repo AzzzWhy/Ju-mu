@@ -6,7 +6,7 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 output_dir="${1:-$project_dir/dist/macos-arm64}"
 dotnet_executable="${DOTNET_EXE:-dotnet}"
 app_path="$output_dir/Jumu.app"
-zip_path="$output_dir/Jumu-0.3.2-mac-arm64.zip"
+zip_path="$output_dir/Jumu-0.3.3-mac-arm64.zip"
 
 if [[ -e "$app_path" || -e "$zip_path" ]]; then
   echo "目标文件已存在；请指定一个新的输出目录，避免覆盖已有应用。" >&2
@@ -22,8 +22,10 @@ mkdir -p "$output_dir/publish"
   -o "$output_dir/publish"
 
 mkdir -p "$app_path/Contents/MacOS"
-install -m 755 "$output_dir/publish/RenpyScribe" "$app_path/Contents/MacOS/RenpyScribe"
+mkdir -p "$app_path/Contents/Resources"
+install -m 755 "$output_dir/publish/Jumu" "$app_path/Contents/MacOS/Jumu"
 install -m 644 "$project_dir/packaging/macos/Info.plist" "$app_path/Contents/Info.plist"
+install -m 644 "$project_dir/src/Scribe.Desktop/Assets/Jumu.icns" "$app_path/Contents/Resources/Jumu.icns"
 plutil -lint "$app_path/Contents/Info.plist"
 
 # Apple Silicon 需要完整有效的应用包签名，而不只是可执行文件的签名。

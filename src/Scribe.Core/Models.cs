@@ -13,6 +13,8 @@ public sealed class ParseOptions
     public ImportMode Mode { get; set; } = ImportMode.Novel;
     public SplitMode Split { get; set; } = SplitMode.Sentence;
     public int MaxLength { get; set; } = 80;
+    // New manuscripts are narration by default; legacy projects are migrated on load.
+    public bool AutoDetectKinds { get; set; }
     public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

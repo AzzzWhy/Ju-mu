@@ -4,11 +4,12 @@
 
 **Turn novels and scripts into dialogue files for Ren’Py.**
 
-Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, or Markdown manuscript, then split it by paragraph or sentence. Jumu uses Chinese and English punctuation, quotation marks, and dialogue cues to identify speech, narration, and stage directions. Review lines individually or in batches, build branches in a visual choice-tree editor, and export a `.rpy` file.
+Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, or Markdown manuscript, then split it by paragraph or sentence. New manuscripts default to narration/action/other, preserving the original wording. Optional dialogue and speaker detection uses Chinese and English punctuation, quotation marks, and dialogue cues. Review lines individually or in batches, build branches in a visual choice-tree editor, and export a `.rpy` file.
 
 ## Highlights
 
 - **Two import modes:** Novel and Script, with paragraph, sentence, or reading-length splitting.
+- **Optional auto-detection:** Dialogue and speakers are not inferred by default; enable them with the “自动识别对白与角色” checkbox.
 - **Human-in-the-loop editing:** Correct line type, speaker, and text; use speaker shortcuts, drag-to-select, and batch review.
 - **Visual branching:** Add, move, and delete choices, including nested branches.
 - **Local workflow:** Save an editable `.jumu` project and export a standalone Ren’Py `.rpy` script. Manuscript processing does not require an internet connection.
@@ -17,7 +18,7 @@ Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, o
 
 Import or paste a manuscript → choose a mode and parse → review the results and choice trees → export the `.rpy` file. Place it in your Ren’Py project’s `game` folder and `call` the exported label from your existing entry point.
 
-Windows x64 package: [Download Jumu 0.3.2 from Releases](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.2/Jumu-0.3.2-win-x64.zip), extract it, and run `RenpyScribe.exe`. Verify the file against [SHA256SUMS.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.2/SHA256SUMS.txt). This build has not yet been tested on a physical Windows machine.
+Windows x64 package: [Download Jumu 0.3.3](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.3/Jumu-0.3.3-win-x64.zip), extract it, and run `Jumu.exe`. Verify it against [SHA256SUMS-0.3.3.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.3/SHA256SUMS-0.3.3.txt). This build has not yet been tested on a physical Windows machine.
 
 Jumu relies on offline rules and **cannot understand every narrative context**. Complex quotations, omitted speakers, and branch content still need human review. It does not generate sprites, backgrounds, audio, or other presentation assets.
 

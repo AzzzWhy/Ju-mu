@@ -9,7 +9,26 @@ var tests = new List<(string Name, Action Body)>();
 void Test(string name, Action body) => tests.Add((name, body));
 string PathFor(string name) => Path.Combine(root, name);
 ParseResult Parse(string text, ImportMode mode = ImportMode.Script, SplitMode split = SplitMode.Sentence) =>
-    ManuscriptParser.Parse(text, new ParseOptions { Mode = mode, Split = split });
+    ManuscriptParser.Parse(text, new ParseOptions { Mode = mode, Split = split, AutoDetectKinds = true });
+
+Test("默认旁白：小说和剧本保留姓名、引号与标点", () =>
+{
+    foreach (var mode in new[] { ImportMode.Novel, ImportMode.Script })
+    {
+        const string source = "林夏：\"你确定？\"\n她说：“我确定。”\n【场景：雨夜】";
+        var result = ManuscriptParser.Parse(source, new ParseOptions { Mode = mode });
+        True(result.Segments.Count >= 3, "应按句子拆分原稿");
+        True(result.Segments.All(s => s.Kind == SegmentKind.Narration && s.Speaker.Length == 0), "所有结果应默认旁白");
+        Equal(WithoutWhitespace(source), WithoutWhitespace(string.Concat(result.Segments.Select(s => s.Text))));
+    }
+});
+Test("默认旁白：工程保存后保留分类设置", () =>
+{
+    var path = PathFor("narration-default.jumu");
+    ProjectStorage.Save(path, new ProjectDocument { SourceText = "林夏：你好。" });
+    var loaded = ProjectStorage.Load(path);
+    True(!loaded.Options.AutoDetectKinds, "重新打开工程仍应采用默认旁白分类");
+});
 
 Test("剧本：中文全角冒号和英文半角冒号", () =>
 {
@@ -39,6 +58,7 @@ Test("剧本：角色别名映射", () =>
     var result = ManuscriptParser.Parse("明：你好。", new ParseOptions
     {
         Mode = ImportMode.Script,
+        AutoDetectKinds = true,
         Aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["明"] = "小明" }
     });
     Equal("小明", result.Segments.Single().Speaker);
@@ -529,6 +549,7 @@ Test("工程：旧版工程缺少新字段时仍可打开", () =>
     Equal("开场。", loaded.Segments.Single().Text);
     Equal(0, loaded.SpeakerShortcuts.Count);
     Equal(0, loaded.ChoiceTrees.Count);
+    True(loaded.Options.AutoDetectKinds, "旧工程应保留原先的自动识别行为");
 });
 Test("工程：保存读取保留人工修正、选项与原文", () =>
 {
@@ -536,7 +557,7 @@ Test("工程：保存读取保留人工修正、选项与原文", () =>
     var project = new ProjectDocument
     {
         SourceFile = "稿件.docx", SourceText = "原文。", RequiresReparse = true,
-        Options = new ParseOptions { Mode = ImportMode.Novel, Split = SplitMode.ReadingLength, MaxLength = 50 },
+        Options = new ParseOptions { Mode = ImportMode.Novel, Split = SplitMode.ReadingLength, MaxLength = 50, AutoDetectKinds = true },
         Segments = [new Segment { Id = "fixed", Kind = SegmentKind.Dialogue, Speaker = "小明", Text = "修正后", Reviewed = true, Include = false, Warnings = ["待确认"] }]
     };
     ProjectStorage.Save(path, project);
