@@ -19,8 +19,8 @@ public static class DocumentImporter
             if (string.IsNullOrWhiteSpace(path)) throw new UserFacingException("请选择要导入的文件。");
             string extension = Path.GetExtension(path).ToLowerInvariant();
             if (extension == ".doc") throw new UserFacingException("暂不支持旧版 Word .doc。请用 Word 或 LibreOffice 将文件另存为 .docx，或另存为 UTF-8 文本后再导入。");
-            if (extension is not (".txt" or ".text" or ".md" or ".markdown" or ".docx"))
-                throw new UserFacingException("不支持此文件格式。请选择 TXT、TEXT、Markdown（作为纯文本读取）或 Word DOCX 文件。");
+            if (extension is not (".txt" or ".text" or ".md" or ".markdown" or ".docx" or ".rpy"))
+                throw new UserFacingException("不支持此文件格式。请选择 TXT、TEXT、Markdown、Word DOCX 或 Ren’Py RPY 源文件；RPYC 编译文件不能反向导入。");
 
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             if (stream.Length > MaxFileBytes) throw new UserFacingException("文件超过 32 MB，请分章节保存后再导入。");

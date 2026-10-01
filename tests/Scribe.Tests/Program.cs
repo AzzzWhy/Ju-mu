@@ -11,6 +11,176 @@ string PathFor(string name) => Path.Combine(root, name);
 ParseResult Parse(string text, ImportMode mode = ImportMode.Script, SplitMode split = SplitMode.Sentence) =>
     ManuscriptParser.Parse(text, new ParseOptions { Mode = mode, Split = split, AutoDetectKinds = true });
 
+Test("RPY 反向导入：角色、中文、旁白和字符串内井号", () =>
+{
+    var result = RenpyImporter.Parse("""
+        define e = Character("林夏", color="#fff")
+        define s = Character(None)
+        label start:
+            "雨停了。" # 注释
+            e "你好，#不是注释！"
+            s '一切如常。'
+            "路人" "Good morning!"
+            return
+        """);
+    var project = result.Project;
+    Equal(4, project.Segments.Count); Equal("林夏", project.Segments[1].Speaker);
+    Equal("你好，#不是注释！", project.Segments[1].Text);
+    Equal(SegmentKind.Narration, project.Segments[2].Kind);
+    Equal("路人", project.Segments[3].Speaker); Equal("start", project.RenpyEntryLabel);
+    True(result.Warnings.Any(w => w.Contains("样式参数")), "应提示样式未转换");
+    Contains("label start:", RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees, project.Fragments));
+});
+Test("RPY 反向导入：菜单、嵌套、素材、回跳及结束", () =>
+{
+    var project = RenpyImporter.Parse("""
+        label start:
+            "入口。"
+            menu:
+                "选择路线"
+                "前往雨夜":
+                    "先打开门。"
+                    jump rain
+                "再选一次":
+                    menu:
+                        "回到入口":
+                            jump start
+                        "结束":
+                            return
+                "继续":
+                    pass
+            "汇合。"
+            return
+        label rain:
+            "雨夜。"
+            jump finish
+        label finish:
+            "结束了。"
+            return
+        """).Project;
+    var tree = project.ChoiceTrees.Single(); Equal("选择路线", tree.Title);
+    var rain = project.Fragments.Single(f => f.Title == "rain");
+    Equal(rain.Id, tree.Branches[0].TargetNodeId);
+    Equal(project.Fragments.Single(f => f.Title == "finish").Id, rain.NextNodeId);
+    var nested = tree.Branches[1].Items.Single().Tree!;
+    Equal(project.Segments[0].Id, nested.Branches[0].TargetNodeId);
+    True(project.Fragments.Any(f => f.Id == nested.Branches[1].TargetNodeId), "return 分支应连接结束素材");
+    Equal("", tree.Branches[2].TargetNodeId);
+    StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
+    var script = RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees, project.Fragments);
+    InOrder(script, "入口。", "选择路线", "前往雨夜", "汇合。", "雨夜。", "结束了。");
+    var again = RenpyImporter.Parse(script).Project;
+    Equal(3, again.ChoiceTrees.Single().Branches.Count);
+    StoryGraphValidator.Validate(again.Segments, again.ChoiceTrees, again.Fragments);
+});
+Test("RPY 反向导入：主线 jump 与 label 顺序继续保留播放顺序", () =>
+{
+    var project = RenpyImporter.Parse("""
+        label start:
+            "甲"
+            jump final
+        label unused:
+            "素材"
+            return
+        label final:
+            "乙"
+        label next:
+            "丙"
+            return
+        """).Project;
+    Equal("甲,乙,丙", string.Join(',', project.Segments.Select(s => s.Text)));
+    Equal("unused", project.Fragments.Single().Title);
+    var script = RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees, project.Fragments);
+    InOrder(script, "甲", "乙", "丙"); True(!script.Contains("素材"), "未连接素材不能自动播放");
+});
+Test("RPY 反向导入：启动 call 包装器与指定入口", () =>
+{
+    var script = RenpyExporter.Generate([Narration("剧情")], new ExportOptions { CreateStartLabel = true });
+    var imported = RenpyImporter.Parse(script).Project;
+    Equal("start", imported.RenpyEntryLabel); Equal("imported_story", imported.Export.Label);
+    True(imported.Export.CreateStartLabel, "应恢复 start 包装器");
+    Equal("剧情", imported.Segments.Single().Text);
+    var alternate = RenpyImporter.Parse("label a:\n    \"甲\"\n    return\nlabel b:\n    \"乙\"\n    return", entryLabel: "b").Project;
+    Equal("乙", alternate.Segments.Single().Text); Equal("a", alternate.Fragments.Single().Title);
+    Contains("不存在", UserError(() => RenpyImporter.Parse(script, entryLabel: "missing")).Message);
+});
+Test("RPY 反向导入：字面文本安全转义往返", () =>
+{
+    const string text = "中文 [name] {b} 100% 〖符号〗 # '引号' \"双引号\" \\目录\n下一行  two spaces";
+    var segment = new Segment { Text = text, Kind = SegmentKind.Dialogue, Speaker = "林夏" };
+    var script = RenpyExporter.Generate([segment], new ExportOptions { Label = "start" });
+    var imported = RenpyImporter.Parse(script).Project.Segments.Single();
+    Equal(text, imported.Text); Equal("林夏", imported.Speaker); Equal(0, imported.Warnings.Count);
+    var active = RenpyImporter.Parse("label start:\n    \"你好，[name] {b}粗体{/b}\"\n    return").Project.Segments.Single();
+    Equal(1, active.Warnings.Count); Contains("[[name]", RenpyExporter.Generate([active], new ExportOptions()));
+});
+Test("RPY 反向导入：说明注释与未定义角色提示", () =>
+{
+    var result = RenpyImporter.Parse("label start:\n    # 说明：动作说明\n    unknown \"你好\"\n    return");
+    Equal(SegmentKind.Direction, result.Project.Segments[0].Kind); Equal("动作说明", result.Project.Segments[0].Text);
+    Equal("unknown", result.Project.Segments[1].Speaker);
+    True(result.Warnings.Any(w => w.Contains("未在本文件定义")), "未定义人物应提示");
+});
+Test("RPY 反向导入：菜单位于开头以及相邻菜单", () =>
+{
+    var project = RenpyImporter.Parse("""
+        label start:
+            menu:
+                "一":
+                    pass
+            menu:
+                "二":
+                    "分支台词"
+            return
+        """).Project;
+    True(!project.Segments.Single().Include, "结构锚点不可显示"); Equal(2, project.ChoiceTrees.Count);
+    InOrder(RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees), "一", "二", "分支台词");
+});
+Test("RPY 反向导入：工程保存恢复标识与连接", () =>
+{
+    var original = RenpyImporter.Parse("label start:\n    \"正文\"\n    menu:\n        \"结束\":\n            return\n    return").Project;
+    var path = PathFor("reverse.jumu"); ProjectStorage.Save(path, original);
+    var loaded = ProjectStorage.Load(path); Equal("start", loaded.RenpyEntryLabel);
+    Equal(original.ChoiceTrees[0].Branches[0].TargetNodeId, loaded.ChoiceTrees[0].Branches[0].TargetNodeId);
+    RenpyExporter.Generate(loaded.Segments, loaded.Export, loaded.ChoiceTrees, loaded.Fragments);
+    loaded.RenpyEntryLabel = null!; UserError(() => ProjectStorage.Save(path, loaded));
+});
+Test("RPY 反向导入：UTF-8 源文件、标签列表与 RPYC 拒绝", () =>
+{
+    var path = PathFor("reverse.rpy"); File.WriteAllText(path, "label start:\n    \"中文\"\n    return", new UTF8Encoding(true));
+    Equal("中文", RenpyImporter.Read(path).Project.Segments.Single().Text);
+    Equal("start", RenpyImporter.Labels(File.ReadAllText(path)).Single());
+    Contains(".rpyc", UserError(() => RenpyImporter.Read(PathFor("compiled.rpyc"))).Message);
+});
+Test("RPY 反向导入：控制逻辑与表达式必须报行号，不能扁平化", () =>
+{
+    foreach (var code in new[] { "if True:", "$ danger()", "python:", "call other", "jump expression destination", "scene bg room", "e happy \"hello\"", "\"hi\" with dissolve", "\"\"\"multiline\"\"\"", "\"unterminated", "\"\\uZZ\"" })
+        Contains("第 2 行", UserError(() => RenpyImporter.Parse("label start:\n    " + code + "\n    \"more\"\n    return")).Message);
+    Contains("第 3 行", UserError(() => RenpyImporter.Parse("label start:\n    menu:\n        \"选项\" if True:\n            pass")).Message);
+});
+Test("RPY 反向导入：重复标签、缩进、外部跳转与无条件循环拒绝", () =>
+{
+    foreach (var script in new[] { "label start:\n    \"文本\"\nlabel start:\n    return", "label start:\n\t\"文本\"", "label start:\n    \"文本\"\n    jump external", "label start:\n    \"文本\"\n    jump start", "label start:\n    return\n    \"不可达\"", "label start(x):\n    \"文本\"", "define e = Character(\"name\", dynamic=True)\nlabel start:\n    e \"文本\"", "label start:\n    call start\n    return" })
+        UserError(() => RenpyImporter.Parse(script));
+});
+Test("RPY 反向导入：顶层 Python 不执行并提示未转换", () =>
+{
+    var result = RenpyImporter.Parse("init python:\n    raise Exception(\"never execute\")\nlabel start:\n    \"__import__('os').system('never execute')\"\n    return");
+    Equal("__import__('os').system('never execute')", result.Project.Segments.Single().Text);
+    True(result.Warnings.Any(w => w.Contains("顶层声明")), "必须提示丢弃初始化代码");
+});
+Test("RPY 反向导入：按引擎规则处理空白、Unicode 与字面转义", () =>
+{
+    var segment = RenpyImporter.Parse("label start:\n    \"A  B\\ \\ C \\u4e2d \\[name] \\{b} \\% \\t \\r\"\n    return").Project.Segments.Single();
+    Equal("A B  C 中 [name] {b} % t r", segment.Text); Equal(0, segment.Warnings.Count);
+});
+Test("RPY 反向导入：空入口与输入上限明确拒绝", () =>
+{
+    UserError(() => RenpyImporter.Parse("label start:\n    return\nlabel unused:\n    \"素材\"\n    return"));
+    UserError(() => RenpyImporter.Parse("label start:\n" + string.Concat(Enumerable.Repeat("    \"句子\"\n", 20_001))));
+    UserError(() => RenpyImporter.Parse(new string('a', DocumentImporter.MaxTextCharacters + 1)));
+});
+
 Test("默认旁白：小说和剧本保留姓名、引号与标点", () =>
 {
     foreach (var mode in new[] { ImportMode.Novel, ImportMode.Script })
@@ -1092,6 +1262,16 @@ if (failed == 0 && args.Length == 2 && args[0] == "--renpy-fixture")
     foreach (var harness in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "RenpyGraph"), "*.rpy"))
         File.Copy(harness, Path.Combine(graphGame, Path.GetFileName(harness)), overwrite: true);
     Console.WriteLine("Ren'Py graph fixture: " + Path.GetDirectoryName(graphGame));
+    // Exercise the same engine-level routes after export -> reverse import -> export.
+    var reverseGame = Path.Combine(Path.GetFullPath(args[1]), "reverse-graph", "game");
+    Directory.CreateDirectory(reverseGame);
+    var restored = RenpyImporter.Parse(File.ReadAllText(Path.Combine(graphGame, "imported_story.rpy"))).Project;
+    File.WriteAllText(Path.Combine(reverseGame, "imported_story.rpy"),
+        RenpyExporter.Generate(restored.Segments, restored.Export, restored.ChoiceTrees, restored.Fragments), new UTF8Encoding(false));
+    ProjectStorage.Save(Path.Combine(Path.GetFullPath(args[1]), "reverse-graph-project.jumu"), restored);
+    foreach (var harness in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "RenpyGraph"), "*.rpy"))
+        File.Copy(harness, Path.Combine(reverseGame, Path.GetFileName(harness)), overwrite: true);
+    Console.WriteLine("Ren'Py reverse-import graph fixture: " + Path.GetDirectoryName(reverseGame));
 }
 return failed == 0 ? 0 : 1;
 

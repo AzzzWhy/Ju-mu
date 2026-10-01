@@ -62,6 +62,8 @@ public static class ProjectStorage
             throw new UserFacingException("工程缺少必要的设置或段落数据，请重新导入原文。");
         if (project.SourceText is null || project.SourceFile is null || project.SourceText.Length > DocumentImporter.MaxTextCharacters || project.SourceFile.Length > 32768)
             throw new UserFacingException("工程原文为空、格式错误或超过 1000 万字符。");
+        if (project.RenpyEntryLabel is null || project.RenpyEntryLabel.Length > 128)
+            throw new UserFacingException("RPY 反向导入的入口标识无效，请重新导入。");
         if (!Enum.IsDefined(project.Options.Mode) || !Enum.IsDefined(project.Options.Split) || project.Options.MaxLength is < 10 or > 10_000)
             throw new UserFacingException("工程的解析模式或拆分长度无效，请重新导入原文。");
         if (project.Segments.Count + project.Fragments.Sum(fragment => fragment?.Segments?.Count ?? 0) > 200_000 || project.Options.Aliases.Count > 10_000 || project.Export.CharacterVariables.Count > 10_000 || project.SpeakerShortcuts.Count > 10_000)

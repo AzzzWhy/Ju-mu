@@ -371,6 +371,8 @@ public sealed class FragmentBagWindow : Window
                     var files = await dialog.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "导入到素材袋", FileTypeFilter = [new("稿件（TXT / DOCX / Markdown）") { Patterns = ["*.txt", "*.text", "*.docx", "*.md", "*.markdown"] }] });
                     if (files.Count == 0) return;
                     if (files[0].TryGetLocalPath() is not { } path) throw new UserFacingException("请选择本地文件。");
+                    if (Path.GetExtension(path).Equals(".rpy", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".rpyc", StringComparison.OrdinalIgnoreCase))
+                        throw new UserFacingException("RPY 需要读取剧情结构，请在主界面使用「导入 .rpy」。");
                     var document = await Task.Run(() => DocumentImporter.Read(path));
                     text.Text = document.Text; title.Text = Path.GetFileNameWithoutExtension(document.FileName);
                     hint.Text = "文件已读入，点击添加后生成一张文本卡片。" + string.Join("；", document.Warnings);

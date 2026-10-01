@@ -9,6 +9,7 @@
 ## 主要功能
 
 - **两种导入模式：**小说正文和剧本，支持按段落、句子或阅读长度拆分。
+- **RPY 反向导入（0.4.4）：**点击「导入 .rpy」选择入口，将单个源文件的对白、旁白、静态角色名、嵌套 `menu` 和静态 `jump` 导回编辑器。其他剧情标签进入素材袋，原文件不改动。导入先检查再确认，替换整个工程并支持撤销；修改原代码后可「重读 .rpy」。这不是完整的 Ren’Py 工程反编译器：不支持 `.rpyc`、跨文件目标、条件/Python/动态表达式、演出语句、多行字符串、一般 `call` 或无条件主线循环。文本标签及插值按字面处理，角色代号重新生成，初始化与样式不会还原。示例见 [reverse-import.rpy](samples/reverse-import.rpy)。
 - **可选自动识别：**默认不推断对白和说话人；勾选「自动识别对白与角色」后才启用规则识别。
 - **人工校正：**修改内容类型、说话人和正文；支持快捷人物姓名、拖动多选、批量确认，以及单句上移和下移。正文和素材文本均支持多选删除、右键删除与右侧顶部删除按钮；删除前确认，并可撤销。若有未同时删除的内容引用目标，整次删除会被阻止。
 - **自动角色代号：**导出时为说话人自动生成 `Character` 定义；有效姓名直接作为代号，复杂姓名安全转换，无说话人的句子使用 `s`。已有角色变量映射仍优先使用。导入现有 Ren’Py 工程前，请检查自动代号是否与工程中已有变量冲突。
@@ -30,9 +31,9 @@
 
 「应用素材袋」/「应用选项树」写回当前工程，仍需保存 `.jumu`；取消不会写回。移动保留句子身份与关联菜单，被跳转引用的句子/片段不可直接删除，应先解除连接。0.4.0 保存使用工程格式 2，可读取旧工程，但旧版应用不能读取新格式，请保留工程备份。
 
-当前版本为 **0.4.3**，包含完整文本素材袋、多选/右键删除、常驻删除按钮和折叠跳转目标。旧版本仍可在 [Releases](https://github.com/AzzzWhy/Ju-mu/releases) 中下载。
+当前版本为 **0.4.4**，新增 RPY 反向导入，保留完整文本素材袋、多选/右键删除、常驻删除按钮和折叠跳转目标。旧版本仍可在 [Releases](https://github.com/AzzzWhy/Ju-mu/releases) 中下载。
 
-Windows x64 压缩包：[下载 Jumu 0.4.3](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.3/Jumu-0.4.3-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.4.3](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.3/Jumu-0.4.3-mac-arm64.zip)。校验值见 [SHA256SUMS-0.4.3.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.3/SHA256SUMS-0.4.3.txt)。Windows 版尚未在真实 Windows 电脑及 Ren’Py 8.5.3 中实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
+Windows x64 压缩包：[下载 Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-mac-arm64.zip)。校验值见 [SHA256SUMS-0.4.4.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/SHA256SUMS-0.4.4.txt)。Windows 版尚未在真实 Windows 电脑及 Ren’Py 8.5.3 中实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 

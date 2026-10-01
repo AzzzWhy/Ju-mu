@@ -37,6 +37,7 @@ public partial class MainWindow : Window
         C<CheckBox>("MotionCheck").IsCheckedChanged += (_, _) => UiMotion.SetEnabled(C<CheckBox>("MotionCheck").IsChecked == true);
         Rows.SelectionMode = SelectionMode.Multiple | SelectionMode.Toggle;
         On("ImportButton", ImportAsync); On("SampleButton", LoadSampleAsync);
+        On("ReverseImportButton", ReverseImportAsync);
         On("ParseButton", ParseAsync); On("ExportButton", ExportAsync);
         On("SaveProjectButton", SaveAsync); On("OpenProjectButton", OpenProjectAsync);
         On("SettingsButton", SettingsAsync); On("HelpButton", HelpAsync);
@@ -328,7 +329,7 @@ public partial class MainWindow : Window
 
     private void OptionsChanged()
     {
-        if (_loading) return;
+        if (_loading || _project.RenpyEntryLabel.Length > 0) return;
         UpdateModeHint();
         if (JsonSerializer.Serialize(CurrentOptions()) == JsonSerializer.Serialize(_project.Options)) return;
         if (string.IsNullOrWhiteSpace(Source.Text)) return;
@@ -338,6 +339,11 @@ public partial class MainWindow : Window
 
     private void UpdateModeHint()
     {
+        if (_project.RenpyEntryLabel.Length > 0)
+        {
+            C<TextBlock>("ModeHint").Text = "RPY 结构导入 · 保留原台词与角色";
+            return;
+        }
         C<TextBlock>("ModeHint").Text = C<CheckBox>("AutoDetectCheck").IsChecked == true
             ? (C<RadioButton>("ScriptMode").IsChecked == true ? "识别角色名、台词与舞台说明" : "结合引号与说话动作识别对白")
             : "默认：旁白/人物动作或其他";
@@ -366,12 +372,61 @@ public partial class MainWindow : Window
             FileTypeFilter = [new("稿件（TXT / DOCX / Markdown）") { Patterns = ["*.txt", "*.text", "*.docx", "*.md", "*.markdown"] }, FilePickerFileTypes.All]
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath(); if (path == null) return;
-        if (_project.Fragments.Count == 0 && !await CanReplace()) return;
+        if (!IsRenpyPath(path) && _project.Fragments.Count == 0 && !await CanReplace()) return;
         await LoadPathAsync(path);
+    }
+
+    private static bool IsRenpyPath(string path) => Path.GetExtension(path).Equals(".rpy", StringComparison.OrdinalIgnoreCase)
+        || Path.GetExtension(path).Equals(".rpyc", StringComparison.OrdinalIgnoreCase);
+
+    private async Task ReverseImportAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "反向导入 Ren’Py 源文件", AllowMultiple = false,
+            FileTypeFilter = [new("Ren’Py 源文件（RPY）") { Patterns = ["*.rpy"] }]
+        });
+        if (files.FirstOrDefault()?.TryGetLocalPath() is { } path) await ReverseImportPathAsync(path);
+    }
+
+    private async Task ReverseImportPathAsync(string path)
+    {
+        if (!Path.GetExtension(path).Equals(".rpy", StringComparison.OrdinalIgnoreCase))
+            throw new UserFacingException("只能反向导入 .rpy 源文件，不支持 .rpyc 编译文件。");
+        var document = await Task.Run(() => DocumentImporter.Read(path));
+        var labels = await Task.Run(() => RenpyImporter.Labels(document.Text));
+        if (labels.Count == 0) throw new UserFacingException("没有找到全局 label，请选择包含剧情的 .rpy 文件。");
+        var entry = new ComboBox { ItemsSource = labels, SelectedItem = labels.Contains("start") ? "start" : labels[0], HorizontalAlignment = HorizontalAlignment.Stretch };
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(new TextBlock { Text = "选择剧情入口", FontWeight = FontWeight.SemiBold });
+        body.Children.Add(entry);
+        body.Children.Add(new TextBlock { Text = "导入对白、旁白、menu 和静态 jump。其他剧情 label 放入素材袋。仅支持单个源文件，不执行 Python；条件逻辑及演出语句暂不转换。\n\n确认导入后会替换整个当前工程（包括素材袋）。建议先保存；导入后可以撤销。原始 RPY 文件不会改动。", TextWrapping = TextWrapping.Wrap, LineHeight = 24 });
+        if (!await CustomDialog("反向导入 .rpy", body, "检查脚本", "取消")) { SetStatus("已取消反向导入，当前工程保留。"); return; }
+        await ImportRenpyTextAsync(document.Text, path, (string)entry.SelectedItem!, false, document.Warnings);
+    }
+
+    private async Task ImportRenpyTextAsync(string text, string path, string entry, bool reparse, IReadOnlyList<string>? fileWarnings = null)
+    {
+        RenpyImportResult result;
+        _busy = true; IsEnabled = false; SetStatus("正在检查 RPY 结构…");
+        try { result = await Task.Run(() => RenpyImporter.Parse(text, path, entry)); }
+        finally { _busy = false; IsEnabled = true; }
+        var warnings = (fileWarnings ?? []).Concat(result.Warnings);
+        if (!await Dialog("确认反向导入", $"入口：{result.EntryLabel}\n主线 {result.Project.Segments.Count} 条，素材 {result.Project.Fragments.Count} 份。\n\n" + string.Join("\n\n", warnings) + "\n\n继续会替换主线、素材袋及选项树；可撤销恢复。", "导入并替换", "取消")) { SetStatus("已取消反向导入，当前工程保留。"); return; }
+        CommitEditor();
+        // Snapshot the visible source too, so undo restores unsaved source edits.
+        _project.SourceText = Source.Text ?? ""; _project.RequiresReparse = _sourceStale;
+        PushUndo();
+        if (reparse) result.Project.Export = _project.Export;
+        else _projectPath = null;
+        _project = result.Project; _dirty = true; _manualEdits = true; _sourceStale = false; _selected = null;
+        SetProjectControls(); Refresh();
+        SetStatus($"RPY 导入完成：入口 {entry}，{_project.Segments.Count} 条主线内容、{_project.Fragments.Count} 份素材。请审核角色与分支。");
     }
 
     private async Task LoadPathAsync(string path)
     {
+        if (IsRenpyPath(path)) { await ReverseImportPathAsync(path); return; }
         if (path.EndsWith(".jumu", StringComparison.OrdinalIgnoreCase))
         {
             var loaded = ProjectStorage.Load(path); _project = loaded; _projectPath = path;
@@ -388,6 +443,7 @@ public partial class MainWindow : Window
         {
             PushUndo();
             _project.SourceFile = path; _project.SourceText = doc.Text; _project.Options = options;
+            _project.RenpyEntryLabel = "";
             _project.Segments = []; _project.ChoiceTrees = []; StoryFragmentEditor.ClearMissingTargets(_project);
         }
         else
@@ -410,10 +466,14 @@ public partial class MainWindow : Window
         C<ComboBox>("SplitChoice").SelectedIndex = (int)_project.Options.Split;
         C<NumericUpDown>("LengthInput").Value = Math.Clamp(_project.Options.MaxLength, 20, 500);
         C<CheckBox>("AutoDetectCheck").IsChecked = _project.Options.AutoDetectKinds;
+        foreach (var name in new[] { "NovelMode", "ScriptMode", "SplitChoice", "LengthInput", "AutoDetectCheck" })
+            C<Control>(name).IsEnabled = _project.RenpyEntryLabel.Length == 0;
+        C<Button>("ParseButton").Content = _project.RenpyEntryLabel.Length > 0 ? "重读 .rpy →" : "解析文本 →";
         UpdateModeHint();
         C<TextBlock>("FileNameText").Text = string.IsNullOrWhiteSpace(_project.SourceFile) ? "粘贴的稿件" : Path.GetFileName(_project.SourceFile);
         C<TextBlock>("SourceCount").Text = $"{_project.SourceText.Length:N0} 字";
-        C<TextBlock>("SourceHint").Text = "原文可编辑 · 修改后点击「解析文本」";
+        C<TextBlock>("SourceHint").Text = _project.RenpyEntryLabel.Length > 0
+            ? "原始 RPY 可编辑；「重读 .rpy」会重新生成整个剧情结构。" : "原文可编辑 · 修改后点击「解析文本」";
         RefreshSpeakerChoices();
         _loading = false;
     }
@@ -425,6 +485,11 @@ public partial class MainWindow : Window
         CommitEditor();
         var text = Source.Text ?? "";
         if (string.IsNullOrWhiteSpace(text)) throw new UserFacingException("请先导入文件，或者将稿件粘贴到左侧原文框。");
+        if (_project.RenpyEntryLabel.Length > 0)
+        {
+            await ImportRenpyTextAsync(text, _project.SourceFile, _project.RenpyEntryLabel, true);
+            return;
+        }
         if (text.Length > 2_000_000) throw new UserFacingException("稿件超过 200 万字符，请按章节分开导入。");
         if (confirmReplace && (_manualEdits || _project.ChoiceTrees.Count > 0 || _project.Fragments.Count > 0) && !await Dialog("重新解析？", "重新解析会用完整原稿替换主线校正和主线选项树。素材袋会保留，但指向旧主线的跳转连接会清除。建议先保存工程，也可以在解析后使用「撤销」。", "重新解析", "取消")) return;
         var options = CurrentOptions();
@@ -803,6 +868,7 @@ public partial class MainWindow : Window
         6. 素材袋中未连接的片段只保存为素材，不会自动导出或播放。移动节点保留连接；取回片段后，连接会转向它的第一句。被引用的目标需先调整连接再删除。
         7. 保存 .jumu 工程保留所有节点和连接。新版可打开旧工程；素材袋工程需要 0.4.0 或更高版本。
         8. 导出 .rpy 到 Ren’Py 的 game 文件夹。已有 start 的工程在其中 call 剧情 label；没有 start 的工程可生成启动入口。目标节点的 label 与 jump 自动生成。
+        9. 点击「导入 .rpy」可反向导入单个源脚本，选择入口后恢复台词、角色、menu 和静态 jump；其他剧情标签成为素材。导入会替换整个工程，可撤销。原代码保存在左侧，重读会重建整个结构，不使用小说断句。暂不支持 .rpyc、条件逻辑、动态表达式或演出语句；不会执行脚本。
 
         角色代号自动定义，无说话人的句子使用 s。中文显示仍需要在 Ren’Py 项目中配置中文字体。旧版 .doc 请先另存为 .docx。
         自动识别使用离线规则；歧义仍需人工复核。所有稿件处理在本机完成。

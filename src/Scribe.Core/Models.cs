@@ -109,6 +109,8 @@ public sealed class ProjectDocument
     public bool RequiresReparse { get; set; }
     public string SourceFile { get; set; } = "";
     public string SourceText { get; set; } = "";
+    // Nonempty only for static RPY imports; reparse uses the script reader, not prose splitting.
+    public string RenpyEntryLabel { get; set; } = "";
     public ParseOptions Options { get; set; } = new();
     public ExportOptions Export { get; set; } = new();
     public List<Segment> Segments { get; set; } = [];
