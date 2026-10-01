@@ -17,9 +17,9 @@
 
 ## 使用方式
 
-导入或粘贴稿件 → 选择模式并解析 → 审核识别结果与选项树 → 导出 `.rpy`，将其放入 Ren’Py 项目的 `game` 文件夹。已有 `label start` 的工程，在其中写入 `call imported_story`（或你设置的入口 label）；没有 `start` 的新工程可在「角色与导出设置」启用生成启动入口。0.3.6 开发版在导出到 `game` 文件夹时也会检查现有 `.rpy` 脚本并提示，避免重复的 `start`。
+导入或粘贴稿件 → 选择模式并解析 → 审核识别结果与选项树 → 导出 `.rpy`，将其放入 Ren’Py 项目的 `game` 文件夹。已有 `label start` 的工程，在其中写入 `call imported_story`（或你设置的入口 label）；没有 `start` 的新工程可在「角色与导出设置」启用生成启动入口。导出到 `game` 文件夹时也会检查现有 `.rpy` 脚本并提示，避免重复的 `start`。
 
-目前公开发布版仍是 0.3.5，不含上述 0.3.6 开发版的启动入口检查。Windows x64 压缩包：[下载 Jumu 0.3.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/Jumu-0.3.5-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.3.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/Jumu-0.3.5-mac-arm64.zip)。校验值见 [SHA256SUMS-0.3.5.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.5/SHA256SUMS-0.3.5.txt)。Windows 版尚未在真实 Windows 电脑上实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
+Windows x64 压缩包：[下载 Jumu 0.3.6](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.6/Jumu-0.3.6-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.3.6](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.6/Jumu-0.3.6-mac-arm64.zip)。校验值见 [SHA256SUMS-0.3.6.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.3.6/SHA256SUMS-0.3.6.txt)。Windows 版尚未在真实 Windows 电脑及 Ren’Py 8.5.3 中实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 
