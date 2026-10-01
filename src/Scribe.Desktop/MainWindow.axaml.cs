@@ -57,6 +57,38 @@ public partial class MainWindow : Window
         On("MoveUpButton", () => MoveSegmentAsync(-1));
         On("MoveDownButton", () => MoveSegmentAsync(1));
         On("DeleteSegmentButton", DeleteSegmentAsync);
+        On("DeleteSelectedButton", DeleteSegmentAsync);
+        var deleteMenu = new MenuItem { Header = "删除所选句子…" };
+        deleteMenu.Click += async (_, _) => await Safe(DeleteSegmentAsync);
+        Rows.ContextMenu = new ContextMenu { ItemsSource = new[] { deleteMenu } };
+        Rows.ContextMenu.Opened += (_, _) => SetStatus("右键菜单已打开：可删除所选句子，删除前会再次确认。");
+        Rows.AddHandler(InputElement.PointerPressedEvent, async (_, e) =>
+        {
+            if (!e.GetCurrentPoint(Rows).Properties.IsRightButtonPressed) return;
+            var index = HitRow(e);
+            if (index < 0 || Rows.ItemsSource?.OfType<Segment>().ElementAtOrDefault(index) is not { } hit) { deleteMenu.IsEnabled = false; return; }
+            e.Handled = true;
+            await Safe(() =>
+            {
+                if (Rows.SelectedItems?.Contains(hit) != true)
+                {
+                    CommitEditor(); _refreshing = true;
+                    try { Rows.SelectedItems?.Clear(); Rows.SelectedItems?.Add(hit); }
+                    finally { _refreshing = false; }
+                    _selected = hit; ShowEditor(); UpdateSelectionCount();
+                }
+                deleteMenu.IsEnabled = true;
+                deleteMenu.Header = $"删除所选 {Rows.SelectedItems?.Count ?? 0} 句…";
+                return Task.CompletedTask;
+            });
+        }, RoutingStrategies.Tunnel);
+        Rows.AddHandler(InputElement.PointerReleasedEvent, (_, e) =>
+        {
+            if (e.InitialPressMouseButton != MouseButton.Right || HitRow(e) < 0) return;
+            e.Handled = true;
+            // Open after the release route so the same click cannot light-dismiss the popup.
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => Rows.ContextMenu?.Open(Rows));
+        }, RoutingStrategies.Tunnel);
         On("UndoButton", UndoAsync);
         On("SelectVisibleButton", SelectVisibleAsync); On("ReviewSelectedButton", ReviewSelectedAsync);
         On("ClearSelectionButton", ClearSelectionAsync);
@@ -311,9 +343,9 @@ public partial class MainWindow : Window
             : "默认：旁白/人物动作或其他";
     }
 
-    private void PushUndo()
+    private void PushUndo(string? snapshot = null)
     {
-        _undo.Push(JsonSerializer.Serialize(_project));
+        _undo.Push(snapshot ?? JsonSerializer.Serialize(_project));
         if (_undo.Count > 30)
         {
             var keep = _undo.Take(30).Reverse().ToArray(); _undo.Clear(); foreach (var item in keep) _undo.Push(item);
@@ -334,7 +366,7 @@ public partial class MainWindow : Window
             FileTypeFilter = [new("稿件（TXT / DOCX / Markdown）") { Patterns = ["*.txt", "*.text", "*.docx", "*.md", "*.markdown"] }, FilePickerFileTypes.All]
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath(); if (path == null) return;
-        if (!await CanReplace()) return;
+        if (_project.Fragments.Count == 0 && !await CanReplace()) return;
         await LoadPathAsync(path);
     }
 
@@ -346,13 +378,26 @@ public partial class MainWindow : Window
             _dirty = false; _manualEdits = true; _sourceStale = loaded.RequiresReparse; _undo.Clear(); SetProjectControls(); Refresh();
             SetStatus(_sourceStale ? "工程已恢复。原文或设置已改变，请重新解析后导出。" : "工程已打开，已恢复校正内容。"); return;
         }
+        CommitEditor();
+        var keepBag = _project.Fragments.Count > 0;
+        if (keepBag && !await Dialog("导入新的正文？", "将替换当前主线正文，但保留素材袋中的完整文本、角色与片段选项树。指向旧正文的连接会清除。建议先保存工程；导入后可撤销。", "替换正文并保留素材袋", "取消")) return;
         SetStatus("正在读取稿件…");
         var doc = await Task.Run(() => DocumentImporter.Read(path));
         var options = CurrentOptions();
-        _project = new ProjectDocument { SourceFile = path, SourceText = doc.Text, Options = options };
-        _projectPath = null; _undo.Clear(); _manualEdits = false; _dirty = true; _sourceStale = true;
+        if (keepBag)
+        {
+            PushUndo();
+            _project.SourceFile = path; _project.SourceText = doc.Text; _project.Options = options;
+            _project.Segments = []; _project.ChoiceTrees = []; StoryFragmentEditor.ClearMissingTargets(_project);
+        }
+        else
+        {
+            _project = new ProjectDocument { SourceFile = path, SourceText = doc.Text, Options = options };
+            _projectPath = null; _undo.Clear();
+        }
+        _manualEdits = false; _dirty = true; _sourceStale = true;
         _selected = null; SetProjectControls();
-        await ParseAsync();
+        await ParseAsync(false);
         if (doc.Warnings.Count > 0) await Dialog("稿件导入提示", string.Join("\n\n", doc.Warnings), "知道了");
     }
 
@@ -373,13 +418,15 @@ public partial class MainWindow : Window
         _loading = false;
     }
 
-    private async Task ParseAsync()
+    private Task ParseAsync() => ParseAsync(true);
+
+    private async Task ParseAsync(bool confirmReplace)
     {
         CommitEditor();
         var text = Source.Text ?? "";
         if (string.IsNullOrWhiteSpace(text)) throw new UserFacingException("请先导入文件，或者将稿件粘贴到左侧原文框。");
         if (text.Length > 2_000_000) throw new UserFacingException("稿件超过 200 万字符，请按章节分开导入。");
-        if ((_manualEdits || _project.ChoiceTrees.Count > 0 || _project.Fragments.Count > 0) && !await Dialog("重新解析？", "重新解析会用完整原稿替换主线校正和主线选项树。素材袋会保留，但指向旧主线的跳转连接会清除。建议先保存工程，也可以在解析后使用「撤销」。", "重新解析", "取消")) return;
+        if (confirmReplace && (_manualEdits || _project.ChoiceTrees.Count > 0 || _project.Fragments.Count > 0) && !await Dialog("重新解析？", "重新解析会用完整原稿替换主线校正和主线选项树。素材袋会保留，但指向旧主线的跳转连接会清除。建议先保存工程，也可以在解析后使用「撤销」。", "重新解析", "取消")) return;
         var options = CurrentOptions();
         _busy = true; IsEnabled = false; SetStatus("正在解析，请稍候…");
         try
@@ -464,7 +511,9 @@ public partial class MainWindow : Window
         var unfiltered = string.IsNullOrWhiteSpace(C<TextBox>("SearchBox").Text) && C<CheckBox>("PendingOnly").IsChecked != true;
         C<Button>("MoveUpButton").IsEnabled = single && unfiltered && index > 0;
         C<Button>("MoveDownButton").IsEnabled = single && unfiltered && index >= 0 && index < _project.Segments.Count - 1;
-        C<Button>("DeleteSegmentButton").IsEnabled = single;
+        C<Button>("DeleteSegmentButton").IsEnabled = _editorTargets.Count > 0;
+        C<Button>("DeleteSelectedButton").IsEnabled = _editorTargets.Count > 0;
+        C<Button>("DeleteSegmentButton").Content = _editorTargets.Count > 1 ? $"删除所选 {_editorTargets.Count} 句" : "删除所选句子";
         C<TextBox>("DialogueBox").Text = _selected?.Text ?? "";
         C<TextBox>("SpeakerBox").Text = _selected?.Speaker ?? "";
         C<ComboBox>("KindChoice").SelectedIndex = (int)(_selected?.Kind ?? SegmentKind.Narration);
@@ -562,21 +611,22 @@ public partial class MainWindow : Window
 
     private async Task DeleteSegmentAsync()
     {
-        if (_selected is null || Rows.SelectedItems?.Count != 1)
-            throw new UserFacingException("请先只选中一句，再删除它。");
+        var selectedIds = Rows.SelectedItems?.OfType<Segment>().Select(segment => segment.Id).ToHashSet(StringComparer.Ordinal) ?? [];
+        if (selectedIds.Count == 0) throw new UserFacingException("请先选择要删除的句子，可点击、拖动或 Shift 多选。");
         CommitEditor();
-        var sentence = _selected;
-        var index = _project.Segments.IndexOf(sentence);
+        var index = _project.Segments.FindIndex(segment => selectedIds.Contains(segment.Id));
         if (index < 0) throw new UserFacingException("要删除的句子已不存在，请重新选择。");
-        var attachedTrees = _project.ChoiceTrees.Count(tree => tree.AnchorSegmentId == sentence.Id);
-        var warning = attachedTrees > 0 ? $"\n\n这句还关联 {attachedTrees} 棵选项树；确认后将连同这些选项树一起删除。" : "";
-        if (!await Dialog("删除句子？", $"将从识别结果中删除第 {index + 1} 句。原始稿件不会改动，重新解析会恢复这句；也可以点击「撤销」。{warning}", "删除句子", "取消")) return;
-        PushUndo();
-        var nextId = _project.Segments.Skip(index + 1).FirstOrDefault()?.Id ?? _project.Segments.Take(index).LastOrDefault()?.Id;
-        var removedTrees = SegmentListEditor.Delete(_project, sentence.Id);
+        var attachedTrees = _project.ChoiceTrees.Count(tree => selectedIds.Contains(tree.AnchorSegmentId));
+        var warning = attachedTrees > 0 ? $"\n\n所选句子关联 {attachedTrees} 棵选项树；确认后将一并删除。" : "";
+        if (!await Dialog("删除所选句子？", $"将删除所选 {selectedIds.Count} 句。原始稿件不会改动；也可以点击「撤销」恢复。{warning}", "删除所选", "取消")) return;
+        var before = JsonSerializer.Serialize(_project);
+        var nextId = _project.Segments.Skip(index).FirstOrDefault(segment => !selectedIds.Contains(segment.Id))?.Id ??
+            _project.Segments.Take(index).LastOrDefault(segment => !selectedIds.Contains(segment.Id))?.Id;
+        var removedTrees = SegmentListEditor.DeleteMany(_project, selectedIds);
+        PushUndo(before);
         _dirty = true; _manualEdits = true; _selected = null; _editorTargets = [];
         Refresh(nextId);
-        SetStatus($"已删除第 {index + 1} 句" + (removedTrees > 0 ? $"及关联的 {removedTrees} 棵选项树" : "") + "。可点击「撤销」恢复。");
+        SetStatus($"已删除 {selectedIds.Count} 句" + (removedTrees > 0 ? $"及关联的 {removedTrees} 棵选项树" : "") + "。可点击「撤销」恢复。");
     }
 
     private Task QuickAddChoiceAsync()
@@ -615,11 +665,11 @@ public partial class MainWindow : Window
     private async Task OpenFragmentBagAsync()
     {
         CommitEditor();
-        var window = new FragmentBagWindow(_project, Rows.SelectedItems?.OfType<Segment>().Select(segment => segment.Id));
+        var window = new FragmentBagWindow(_project);
         if (!await window.ShowDialog<bool>(this) || !window.HasChanges) return;
         PushUndo(); _project = window.EditedProject!; _selected = null; _editorTargets = [];
         _dirty = true; _manualEdits = true;
-        Refresh(); SetStatus($"素材袋已更新：{_project.Fragments.Count} 个片段。可在选项树中连接跳转；可撤销本次修改。");
+        Refresh(); SetStatus($"素材袋已更新：{_project.Fragments.Count} 份完整文本。可在选项树中连接跳转；可撤销本次修改。");
     }
 
     private Task UndoAsync()
@@ -746,10 +796,10 @@ public partial class MainWindow : Window
 
     private Task HelpAsync() => Dialog("句幕使用说明", """
         1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。选择小说/剧本模式后解析；默认保留为旁白，需要时开启自动识别对白与角色。
-        2. 点击句子校正正文、角色与类型。点击/拖动多选后可批量确认。单句支持上移、下移、删除、拆分和合并；关联选项树随句子移动。
-        3. 打开「素材袋」：勾选连续句子，拖动 ⠿ 到袋子里，成为独立的片段节点。将卡片拖回主线可插入到任意句子前后。也可使用收纳/取出按钮。
-        4. 点击素材卡片可修改名称、文字和说话人、调整句子顺序、编辑片段内选项树。片段结束默认连接到原来的后续句子，也可选择其他节点。
-        5. 打开「选项树」：添加分支及嵌套菜单。把左侧素材卡片拖到黄色选项节点可建立跳转；在右侧「分支结束后」也可选择正文中的任意一句。跳转后从目标位置继续剧情；未设置跳转的分支会回到当前主线。
+        2. 点击句子校正正文、角色与类型。点击/拖动多选后可批量确认和删除；右键菜单、列表上方和右侧顶部均有删除入口。单句支持上移、下移、拆分和合并；关联选项树随句子移动。
+        3. 打开「素材袋」：新建或导入一份完整文本，或把已校正的整篇正文收纳进去。每份文本只有一张卡片，不逐句收纳；可以整块拖回正文开头/末尾。收纳全部正文后可再导入其他稿件，素材仍保留。
+        4. 点击素材卡片默认编辑完整文本；展开逐句校正可修改内部对话的角色与内容类型。空行分隔内部对话块，修改已有块保留角色/连接；可编辑本文选项树和结束后的后续节点。
+        5. 素材卡片可勾选或 Ctrl（Mac Cmd）点击多选，通过右键菜单或右侧顶部按钮删除。打开「选项树」后，右侧「分支结束后」优先列出折叠的素材和当前修改文本；直接点击整份文本即可跳转，点击 ▸ 展开后可选内部位置。跳转后从目标继续剧情；未设置跳转的分支会继续当前主线。
         6. 素材袋中未连接的片段只保存为素材，不会自动导出或播放。移动节点保留连接；取回片段后，连接会转向它的第一句。被引用的目标需先调整连接再删除。
         7. 保存 .jumu 工程保留所有节点和连接。新版可打开旧工程；素材袋工程需要 0.4.0 或更高版本。
         8. 导出 .rpy 到 Ren’Py 的 game 文件夹。已有 start 的工程在其中 call 剧情 label；没有 start 的工程可生成启动入口。目标节点的 label 与 jump 自动生成。

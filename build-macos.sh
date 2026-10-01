@@ -6,7 +6,7 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 output_dir="${1:-$project_dir/dist/macos-arm64}"
 dotnet_executable="${DOTNET_EXE:-dotnet}"
 app_path="$output_dir/Jumu.app"
-zip_path="$output_dir/Jumu-0.4.1-mac-arm64.zip"
+zip_path="$output_dir/Jumu-0.4.3-mac-arm64.zip"
 
 if [[ -e "$app_path" || -e "$zip_path" ]]; then
   echo "目标文件已存在；请指定一个新的输出目录，避免覆盖已有应用。" >&2

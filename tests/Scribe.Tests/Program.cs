@@ -70,6 +70,170 @@ Test("逐句顺序：删除句子仅清理其关联选项树并保留原稿", ()
     UserError(() => SegmentListEditor.Delete(project, second.Id));
 });
 
+Test("批量删除：非连续正文及其菜单一次删除，原稿与其他正文保留", () =>
+{
+    var project = new ProjectDocument { SourceText = "原稿", Segments = [Narration("甲"), Narration("乙"), Narration("丙"), Narration("丁")] };
+    var a = project.Segments[0]; var b = project.Segments[1]; var c = project.Segments[2];
+    ChoiceTreeEditor.AddQuickChoice(project, "随甲删除", a.Id).Branch.TargetNodeId = c.Id;
+    ChoiceTreeEditor.AddQuickChoice(project, "保留乙", b.Id);
+    Equal(1, SegmentListEditor.DeleteMany(project, [a.Id, c.Id]));
+    Equal("乙,丁", string.Join(',', project.Segments.Select(segment => segment.Text)));
+    Equal(b.Id, project.ChoiceTrees.Single().AnchorSegmentId); Equal("原稿", project.SourceText);
+    StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
+});
+Test("批量删除：外部引用、重复和失效选择均不发生部分删除", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("甲"), Narration("乙"), Narration("丙")] };
+    var a = project.Segments[0]; var b = project.Segments[1]; var c = project.Segments[2];
+    var branch = ChoiceTreeEditor.AddQuickChoice(project, "保留的外部引用", c.Id).Branch;
+    branch.TargetNodeId = b.Id;
+    var before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => SegmentListEditor.DeleteMany(project, [a.Id, b.Id]));
+    UserError(() => SegmentListEditor.DeleteMany(project, [a.Id, "失效"]));
+    UserError(() => SegmentListEditor.DeleteMany(project, [a.Id, a.Id]));
+    UserError(() => SegmentListEditor.DeleteMany(project, []));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+    branch.TargetNodeId = "";
+    var card = StoryFragmentEditor.AddText(project, "外部素材", "素材正文"); card.NextNodeId = b.Id;
+    before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => SegmentListEditor.DeleteMany(project, [a.Id, b.Id]));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+});
+Test("批量删除：允许删除全部正文，空主线工程仍可保存", () =>
+{
+    var project = new ProjectDocument { SourceText = "原稿", Segments = [Narration("甲"), Narration("乙")] };
+    SegmentListEditor.DeleteMany(project, project.Segments.Select(segment => segment.Id).ToList());
+    Equal(0, project.Segments.Count); Equal("原稿", project.SourceText);
+    var path = PathFor("delete-all.jumu"); ProjectStorage.Save(path, project);
+    Equal(0, ProjectStorage.Load(path).Segments.Count);
+});
+Test("素材多选删除：一起删除互相连接的素材，其他文本不变", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("主线")] };
+    var a = StoryFragmentEditor.AddText(project, "甲", "甲正文");
+    var b = StoryFragmentEditor.AddText(project, "乙", "乙正文");
+    var c = StoryFragmentEditor.AddText(project, "丙", "丙正文");
+    a.NextNodeId = b.Id; b.NextNodeId = a.Segments[0].Id;
+    StoryFragmentEditor.DeleteMany(project, [a.Id, b.Id]);
+    Equal(c.Id, project.Fragments.Single().Id); Equal("主线", project.Segments.Single().Text);
+});
+Test("素材多选删除：外部连接或失效选择阻止整个操作", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("主线")] };
+    var a = StoryFragmentEditor.AddText(project, "甲", "甲正文");
+    var b = StoryFragmentEditor.AddText(project, "乙", "乙正文");
+    var c = StoryFragmentEditor.AddText(project, "丙", "丙正文");
+    c.NextNodeId = b.Segments[0].Id;
+    var before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => StoryFragmentEditor.DeleteMany(project, [a.Id, b.Id]));
+    UserError(() => StoryFragmentEditor.DeleteMany(project, [a.Id, "失效"]));
+    UserError(() => StoryFragmentEditor.DeleteMany(project, [a.Id, a.Id]));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+    c.NextNodeId = "";
+    ChoiceTreeEditor.AddQuickChoice(project, "主线引用", project.Segments[0].Id).Branch.TargetNodeId = a.Id;
+    before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => StoryFragmentEditor.DeleteMany(project, [a.Id, b.Id]));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+});
+Test("折叠跳转目录：素材优先、正文作为整份文本，内部位置独立保留", () =>
+{
+    var project = new ProjectDocument { SourceFile = "第一章.txt", Segments = [Narration("开头"), Narration("结尾")] };
+    var a = StoryFragmentEditor.AddText(project, "雨夜", "第一段\n第二段", SplitMode.Paragraph);
+    var groups = StoryDestinationCatalog.Build(project);
+    Equal(2, groups.Count); Equal(a.Id, groups[0].Whole.Id);
+    Equal(project.Segments[0].Id, groups[1].Whole.Id);
+    True(groups[1].Whole.Name.Contains("当前修改文本", StringComparison.Ordinal), "正文应作为可折叠整块文本");
+    Equal(a.Segments[1].Id, groups[0].TextPositions[1].Id);
+    Equal(project.Segments[1].Id, groups[1].TextPositions[1].Id);
+    ChoiceTreeEditor.AddQuickChoice(project, "去整份雨夜文本", project.Segments[0].Id).Branch.TargetNodeId = groups[0].Whole.Id;
+    InOrder(RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees, project.Fragments), "jump jumu_node_", "第一段", "第二段");
+});
+Test("折叠跳转目录：正在修改的素材优先、整份正文跳转可生成 label", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("开头"), Narration("后文")] };
+    var a = StoryFragmentEditor.AddText(project, "甲", "甲正文");
+    var b = StoryFragmentEditor.AddText(project, "乙", "乙正文");
+    var groups = StoryDestinationCatalog.Build(project, b.Id);
+    Equal(b.Id, groups[0].Whole.Id); Equal(a.Id, groups[1].Whole.Id);
+    ChoiceTreeEditor.AddQuickChoice(project, "重读正文", project.Segments[1].Id).Branch.TargetNodeId = groups[^1].Whole.Id;
+    InOrder(RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees, project.Fragments), "label jumu_node_", "开头", "后文", "jump jumu_node_");
+    project.Segments.Clear(); project.ChoiceTrees.Clear();
+    Equal(2, StoryDestinationCatalog.Build(project).Count);
+});
+
+Test("素材袋：新建长文本只生成一张卡片，默认旁白且可保存取出", () =>
+{
+    var project = new ProjectDocument();
+    const string text = "林夏：我们出发吧。\n雨落在窗前。她关上灯，沿着走廊往前走。\n第二天，故事继续。";
+    var card = StoryFragmentEditor.AddText(project, "第一章", text);
+    Equal(1, project.Fragments.Count);
+    True(card.Segments.Count > 1, "内部播放块可拆分，外部仍只是一张文本卡片");
+    True(card.Segments.All(segment => segment.Kind == SegmentKind.Narration && segment.Speaker == ""), "添加文本默认旁白");
+    Equal(WithoutWhitespace(text), WithoutWhitespace(string.Concat(card.Segments.Select(segment => segment.Text))));
+    var path = PathFor("whole-text.jumu"); ProjectStorage.Save(path, project);
+    var loaded = ProjectStorage.Load(path);
+    StoryFragmentEditor.Restore(loaded, card.Id, 0);
+    Equal(0, loaded.Fragments.Count);
+    Equal(card.Segments.Count, loaded.Segments.Count);
+    True(RenpyExporter.Generate(loaded.Segments, loaded.Export).Contains("第二天", StringComparison.Ordinal), "整份取出后可导出");
+});
+Test("素材袋：整篇已校正正文可收纳，保留全部设置和选项树", () =>
+{
+    var dialogue = new Segment { Text = "已经修改的对白。", Source = "原对白", Kind = SegmentKind.Dialogue, Speaker = "林夏", Reviewed = true };
+    var ending = Narration("已修改结尾。"); ending.Include = false;
+    var project = new ProjectDocument { SourceText = "原稿保持不变", Segments = [dialogue, ending] };
+    var branch = ChoiceTreeEditor.AddQuickChoice(project, "结尾", dialogue.Id).Branch;
+    branch.TargetNodeId = ending.Id;
+    var card = StoryFragmentEditor.StashMain(project, "校正版第一章");
+    Equal(0, project.Segments.Count); Equal(1, project.Fragments.Count); Equal(2, card.Segments.Count);
+    True(ReferenceEquals(dialogue, card.Segments[0]) && dialogue.Reviewed, "校正字段与身份应保留");
+    True(!card.Segments[1].Include, "排除设置应保留");
+    Equal(ending.Id, card.ChoiceTrees[0].Branches[0].TargetNodeId);
+    var path = PathFor("stash-all.jumu"); ProjectStorage.Save(path, project);
+    StoryFragmentEditor.Restore(project, card.Id, 0);
+    Equal("林夏", project.Segments[0].Speaker); Equal("原稿保持不变", project.SourceText);
+});
+Test("素材袋：完整文本编辑保留角色、句子身份及跳转锚点", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("入口")] };
+    var card = StoryFragmentEditor.AddText(project, "路线", "开始。\n林夏的对白。\n结束。", SplitMode.Paragraph);
+    var dialogue = card.Segments[1]; dialogue.Kind = SegmentKind.Dialogue; dialogue.Speaker = "林夏"; dialogue.Reviewed = true;
+    ChoiceTreeEditor.AddQuickChoice(project, "跳转", project.Segments[0].Id).Branch.TargetNodeId = dialogue.Id;
+    var first = card.Segments[0];
+    StoryFragmentEditor.UpdateText(project, card, "开始。\n\n改过的对白。\n\n结束。");
+    True(ReferenceEquals(dialogue, card.Segments[1]), "修改应保留链接目标对象");
+    Equal("林夏", dialogue.Speaker); True(!dialogue.Reviewed && ReferenceEquals(first, card.Segments[0]), "只有改写的块重置确认");
+    Equal(dialogue.Id, project.ChoiceTrees[0].Branches[0].TargetNodeId);
+    StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
+});
+Test("素材袋：完整文本增添正文保留旧块，不能误删除关联位置", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("入口")] };
+    var card = StoryFragmentEditor.AddText(project, "路线", "甲\n乙\n丙", SplitMode.Paragraph);
+    var middle = card.Segments[1]; var ending = card.Segments[2];
+    ChoiceTreeEditor.AddQuickChoice(project, "跳转", project.Segments[0].Id).Branch.TargetNodeId = middle.Id;
+    StoryFragmentEditor.UpdateText(project, card, "新开头\n\n甲\n\n乙\n\n丙");
+    True(card.Segments.Contains(middle) && card.Segments.Contains(ending), "添加新块时已有身份保留");
+    var before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => StoryFragmentEditor.UpdateText(project, card, "新开头\n\n甲\n\n丙"));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+    UserError(() => StoryFragmentEditor.UpdateText(project, card, ""));
+    UserError(() => StoryFragmentEditor.AddText(project, "空文本", "  "));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+});
+Test("素材袋：改写不得移除承载选项树的块", () =>
+{
+    var project = new ProjectDocument();
+    var card = StoryFragmentEditor.AddText(project, "路线", "甲\n乙\n丙", SplitMode.Paragraph);
+    var tree = new ChoiceTree { AnchorSegmentId = card.Segments[1].Id, Branches = [new ChoiceBranch { Label = "继续" }] };
+    card.ChoiceTrees.Add(tree);
+    var before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => StoryFragmentEditor.UpdateText(project, card, "甲\n\n丙"));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+    StoryFragmentEditor.UpdateText(project, card, "甲\n\n改写乙\n\n丙");
+    Equal(card.Segments[1].Id, tree.AnchorSegmentId);
+});
+
 Test("素材袋：收纳连续文本时保留身份、角色、选项树与后续连接", () =>
 {
     var opening = Narration("入口。");

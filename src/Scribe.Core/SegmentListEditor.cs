@@ -19,14 +19,24 @@ public static class SegmentListEditor
 
     /// <returns>The number of top-level choice trees removed with the sentence.</returns>
     public static int Delete(ProjectDocument project, string segmentId)
+        => DeleteMany(project, [segmentId]);
+
+    /// <summary>Validates the whole selection before removing anything.</summary>
+    public static int DeleteMany(ProjectDocument project, IReadOnlyCollection<string> segmentIds)
     {
         ArgumentNullException.ThrowIfNull(project);
-        ChoiceTreeValidator.Validate(project.ChoiceTrees, project.Segments);
-        var index = Find(project, segmentId);
-        if (StoryFragmentEditor.IsReferenced(project, segmentId))
-            throw new UserFacingException("这句是选项或片段的跳转目标。请先调整连接，再删除句子。");
-        var removedTrees = project.ChoiceTrees.RemoveAll(tree => tree.AnchorSegmentId == segmentId);
-        project.Segments.RemoveAt(index);
+        StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
+        if (segmentIds is null || segmentIds.Count == 0) throw new UserFacingException("请先选择要删除的句子。");
+        var chosen = segmentIds.ToHashSet(StringComparer.Ordinal);
+        if (chosen.Count != segmentIds.Count || !chosen.IsSubsetOf(project.Segments.Select(segment => segment.Id).ToHashSet(StringComparer.Ordinal)))
+            throw new UserFacingException("选择中有重复或已不存在的句子，请重新选择。");
+        var remainingTrees = project.ChoiceTrees.Where(tree => !chosen.Contains(tree.AnchorSegmentId))
+            .Concat(project.Fragments.SelectMany(fragment => fragment.ChoiceTrees));
+        if (StoryFragmentEditor.Branches(remainingTrees).Any(branch => chosen.Contains(branch.TargetNodeId)) ||
+            project.Fragments.Any(fragment => chosen.Contains(fragment.NextNodeId)))
+            throw new UserFacingException("所选句子中有其他选项或素材文本的跳转目标。请先调整连接，再删除；本次没有删除任何句子。");
+        var removedTrees = project.ChoiceTrees.RemoveAll(tree => chosen.Contains(tree.AnchorSegmentId));
+        project.Segments.RemoveAll(segment => chosen.Contains(segment.Id));
         return removedTrees;
     }
 

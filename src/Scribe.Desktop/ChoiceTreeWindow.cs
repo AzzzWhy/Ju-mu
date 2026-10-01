@@ -327,7 +327,7 @@ public sealed class ChoiceTreeWindow : Window
                 Background = Brush.Parse("#EAF0FB"), BorderBrush = Brush.Parse("#91A9D0"),
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10),
                 Cursor = new Cursor(StandardCursorType.Hand),
-                Child = new TextBlock { Text = $"▣ {fragment.Title}\n{fragment.Segments.Count} 句", TextWrapping = TextWrapping.Wrap }
+                Child = new TextBlock { Text = $"▣ {fragment.Title}\n{fragment.Segments.Sum(segment => segment.Text.Length)} 字 · 完整文本", TextWrapping = TextWrapping.Wrap }
             };
             Point? start = null;
             card.Classes.Add("motion-card");
@@ -798,19 +798,13 @@ public sealed class ChoiceTreeWindow : Window
         var label = new TextBox { Text = branch.Label, Watermark = "例如：打开那扇门" };
         _details.Children.Add(label);
         _details.Children.Add(Caption("分支结束后"));
-        var targets = new List<StoryTarget> { new("", "继续当前主线（不跳转）") };
-        targets.AddRange(_targets);
-        var target = new ComboBox
-        {
-            ItemsSource = targets, HorizontalAlignment = HorizontalAlignment.Stretch,
-            SelectedItem = targets.FirstOrDefault(item => item.Id == branch.TargetNodeId) ?? targets[0]
-        };
+        var target = new StoryTargetPicker(_context, branch.TargetNodeId, "继续当前主线（不跳转）", _routeFragmentId);
         _details.Children.Add(target);
-        _details.Children.Add(Note("选择目标后，播放本分支内容，再跳到目标位置继续剧情。可跳到正文句子或素材袋片段。"));
+        _details.Children.Add(Note("素材和当前修改文本默认折叠，可直接选择整份文本。点击 ▸ 展开后，再选内部文本位置；跳转后从目标继续剧情。"));
         _commitDetails = () =>
         {
             branch.Label = (label.Text ?? "").Trim();
-            branch.TargetNodeId = (target.SelectedItem as StoryTarget)?.Id ?? "";
+            branch.TargetNodeId = target.SelectedId;
         };
         var update = Button("更新跳转连接", primary: true);
         update.Click += (_, _) => { CommitDetails(); RenderAll(); };

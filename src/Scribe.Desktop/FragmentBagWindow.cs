@@ -4,6 +4,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using Scribe.Core;
 
 namespace Scribe.Desktop;
@@ -13,28 +15,29 @@ public sealed class FragmentBagWindow : Window
 {
     private ProjectDocument _project;
     private readonly string _initialJson;
-    private readonly HashSet<string> _selection = [];
     private readonly Stack<string> _history = new();
+    private readonly HashSet<string> _bagSelection = [];
+    private readonly Button _deleteSelected = new() { Content = "删除所选素材", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly StackPanel _main = new() { Spacing = 7 };
     private readonly StackPanel _bag = new() { Spacing = 10 };
     private readonly StackPanel _details = new() { Spacing = 10 };
     private readonly Border _mainPanel = Panel();
     private readonly Border _bagPanel = Panel();
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brush.Parse("#64786D") };
-    private readonly List<(Border Card, int Index)> _mainCards = [];
+    private Border? _mainCard;
     private string? _fragmentId;
     private string? _sentenceId;
+    private bool _lineEditor;
     private Action? _commit;
     public ProjectDocument? EditedProject { get; private set; }
     public bool HasChanges { get; private set; }
 
-    public FragmentBagWindow(ProjectDocument project, IEnumerable<string>? selectedIds = null)
+    public FragmentBagWindow(ProjectDocument project)
     {
         _initialJson = JsonSerializer.Serialize(project);
         _project = JsonSerializer.Deserialize<ProjectDocument>(_initialJson)!;
-        if (selectedIds is not null) _selection.UnionWith(selectedIds);
         Title = "素材袋与剧情节点 · 句幕";
-        Width = 1370; Height = 860; MinWidth = 1080; MinHeight = 680;
+        Width = 1450; Height = 900; MinWidth = 1170; MinHeight = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = Brush.Parse("#F8FAF6");
         Build(); Render();
@@ -66,38 +69,44 @@ public sealed class FragmentBagWindow : Window
 
     private void Build()
     {
-        var grid = new Grid { Margin = new Thickness(20), ColumnDefinitions = new ColumnDefinitions("1.1*,12,0.9*,12,340"), RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        var grid = new Grid { Margin = new Thickness(20), ColumnDefinitions = new ColumnDefinitions("1*,12,0.9*,12,430"), RowDefinitions = new RowDefinitions("Auto,*,Auto") };
         var header = new StackPanel { Spacing = 6, Margin = new Thickness(0, 0, 0, 14) };
         header.Children.Add(new TextBlock { Text = "素材袋与剧情节点", FontSize = 24, FontWeight = FontWeight.Bold });
-        header.Children.Add(Note("勾选连续句子，拖动 ⠿ 收进中间的袋子；将片段卡片拖回左侧，可插入到目标句子前后。所有修改在应用后写回工程。"));
+        header.Children.Add(Note("袋子存放整块文本，不逐句收纳。可以新建/导入文本，或收纳已校正的整篇正文；每份文本只有一张节点卡片，供选项树连接跳转。"));
         Grid.SetColumnSpan(header, 5); grid.Children.Add(header);
 
         var mainLayout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*") };
-        mainLayout.Children.Add(Caption("主线 · 选择连续句子"));
+        mainLayout.Children.Add(Caption("当前已校正正文 · 整篇文本"));
         var mainActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 10, 0, 10) };
-        mainActions.Children.Add(ActionButton("收纳所选 →", StashSelection, true));
-        mainActions.Children.Add(ActionButton("清除选择", () => { _selection.Clear(); Render(); }));
+        var stash = ActionButton("整篇收纳 →", StashMain, true);
+        mainActions.Children.Add(stash);
         Grid.SetRow(mainActions, 1); mainLayout.Children.Add(mainActions);
         var mainScroll = new ScrollViewer { Content = _main, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         Grid.SetRow(mainScroll, 2); mainLayout.Children.Add(mainScroll);
         _mainPanel.Child = mainLayout; Grid.SetRow(_mainPanel, 1); grid.Children.Add(_mainPanel);
 
-        var bagLayout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*") };
-        bagLayout.Children.Add(Caption("素材袋 · 剧情片段节点"));
-        var add = ActionButton("＋ 新建片段", () =>
-        {
-            Snapshot();
-            var fragment = new StoryFragment { Title = "新片段", Segments = [new Segment { Text = "在这里写入片段正文。" }] };
-            _project.Fragments.Add(fragment); _fragmentId = fragment.Id; _sentenceId = fragment.Segments[0].Id; Render();
-        });
+        var bagLayout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto,Auto,*") };
+        bagLayout.Children.Add(Caption("素材袋 · 完整文本节点"));
+        var add = ActionButton("＋ 新建 / 导入文本", OpenNewText);
         add.Margin = new Thickness(0, 10, 0, 8); Grid.SetRow(add, 1); bagLayout.Children.Add(add);
-        var help = Note("↓ 将主线文本拖到此区域收纳。\n袋中片段只在选项跳转时播放；结束后继续它的后续连接。");
+        var help = Note("每张卡片是一份完整文本，可包含多段正文和角色对白。拖到选项树中的选项建立跳转；也可整块拖回左侧正文。");
         help.Margin = new Thickness(0, 0, 0, 10); Grid.SetRow(help, 2); bagLayout.Children.Add(help);
+        var bagActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 8) };
+        bagActions.Children.Add(ActionButton("全选素材", () => { Commit(); _bagSelection.UnionWith(_project.Fragments.Select(fragment => fragment.Id)); Render(); }));
+        bagActions.Children.Add(ActionButton("清除多选", () => { Commit(); _bagSelection.Clear(); _fragmentId = null; Render(); }));
+        bagActions.Children.Add(ActionButton("删除所选", () => ConfirmDelete(_bagSelection.ToList())));
+        Grid.SetRow(bagActions, 3); bagLayout.Children.Add(bagActions);
         var bagScroll = new ScrollViewer { Content = _bag, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
-        Grid.SetRow(bagScroll, 3); bagLayout.Children.Add(bagScroll);
+        Grid.SetRow(bagScroll, 4); bagLayout.Children.Add(bagScroll);
         _bagPanel.Child = bagLayout; Grid.SetColumn(_bagPanel, 2); Grid.SetRow(_bagPanel, 1); grid.Children.Add(_bagPanel);
 
-        var editor = Panel(); editor.Child = new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        var editor = Panel();
+        var editorLayout = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        _deleteSelected.Margin = new Thickness(0, 0, 0, 10);
+        _deleteSelected.Click += (_, _) => ConfirmDelete(_bagSelection.ToList());
+        editorLayout.Children.Add(_deleteSelected);
+        var editorScroll = new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        Grid.SetRow(editorScroll, 1); editorLayout.Children.Add(editorScroll); editor.Child = editorLayout;
         Grid.SetColumn(editor, 4); Grid.SetRow(editor, 1); grid.Children.Add(editor);
         var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 14, 0, 0) };
         footer.Children.Add(_status);
@@ -106,7 +115,7 @@ public sealed class FragmentBagWindow : Window
         {
             if (_history.Count == 0) return;
             _commit = null; _project = JsonSerializer.Deserialize<ProjectDocument>(_history.Pop())!;
-            _selection.RemoveWhere(id => !_project.Segments.Any(segment => segment.Id == id)); Render();
+            Render();
         }));
         actions.Children.Add(ActionButton("取消", () => Close(false)));
         actions.Children.Add(ActionButton("应用素材袋", () =>
@@ -121,42 +130,49 @@ public sealed class FragmentBagWindow : Window
 
     private void Render()
     {
-        _main.Children.Clear(); _bag.Children.Clear(); _mainCards.Clear();
-        foreach (var (sentence, index) in _project.Segments.Select((sentence, index) => (sentence, index)))
+        _main.Children.Clear(); _bag.Children.Clear(); _mainCard = null;
+        _bagSelection.IntersectWith(_project.Fragments.Select(fragment => fragment.Id));
+        _deleteSelected.IsEnabled = _bagSelection.Count > 0;
+        _deleteSelected.Content = _bagSelection.Count > 0 ? $"删除所选 {_bagSelection.Count} 份素材" : "删除所选素材";
+        if (_project.Segments.Count > 0)
         {
-            var row = new Border { Background = Brush.Parse("#F7F9F6"), BorderBrush = Brush.Parse("#E1E8DF"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8) };
+            var row = new Border { Background = Brush.Parse("#F7F9F6"), BorderBrush = Brush.Parse("#E1E8DF"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12) };
             row.Classes.Add("motion-card");
-            var content = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-            var check = new CheckBox { IsChecked = _selection.Contains(sentence.Id), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
-            check.IsCheckedChanged += (_, _) => { if (check.IsChecked == true) _selection.Add(sentence.Id); else _selection.Remove(sentence.Id); };
-            content.Children.Add(check);
-            var body = new StackPanel { Spacing = 4 };
-            body.Children.Add(Note($"{index + 1:00} · {sentence.SpeakerLabel}"));
-            body.Children.Add(new TextBlock { Text = sentence.Preview, TextWrapping = TextWrapping.Wrap, MaxLines = 3, TextTrimming = TextTrimming.CharacterEllipsis });
-            Grid.SetColumn(body, 1); content.Children.Add(body);
-            var handle = new Border { Padding = new Thickness(10), Cursor = new Cursor(StandardCursorType.Hand), Child = new TextBlock { Text = "⠿", FontSize = 21 } };
-            Grid.SetColumn(handle, 2); content.Children.Add(handle); row.Child = content;
+            var body = new StackPanel { Spacing = 12 };
+            var handle = new Border { Padding = new Thickness(8), Cursor = new Cursor(StandardCursorType.Hand), Child = Caption("⠿  整篇正文 · 拖入素材袋") };
+            body.Children.Add(handle);
+            body.Children.Add(Note($"{_project.Segments.Sum(segment => segment.Text.Length)} 字 · {_project.ChoiceTrees.Count} 棵选项树。保留已修改文字、角色、确认状态和连接。"));
+            body.Children.Add(new TextBlock { Text = string.Join("\n\n", _project.Segments.Select(segment => segment.Text)), TextWrapping = TextWrapping.Wrap });
+            row.Child = body;
             AttachDrag(handle, e =>
             {
                 if (!Inside(_bagPanel, e)) return;
-                if (!_selection.Contains(sentence.Id)) { _selection.Clear(); _selection.Add(sentence.Id); }
-                StashSelection();
+                StashMain();
             });
-            _mainCards.Add((row, index)); _main.Children.Add(row);
+            _mainCard = row; _main.Children.Add(row);
         }
-        _main.Children.Add(Note("拖到最后一句下方：将素材放在主线末尾。"));
+        else _main.Children.Add(Note("当前正文为空。可以新建多份素材文本；将卡片拖回来或点击取出，作为正文继续编辑。"));
+        _main.Children.Add(Note("拖到正文卡片上半部：插入整篇文本之前；下半部或空白处：追加到末尾。"));
         foreach (var fragment in _project.Fragments)
         {
-            var selected = fragment.Id == _fragmentId;
+            var selected = _bagSelection.Contains(fragment.Id);
             var card = new Border
             {
                 Background = Brush.Parse(selected ? "#DCE8FB" : "#EEF3FC"), BorderBrush = Brush.Parse(selected ? "#527EB9" : "#A7BCDD"),
                 BorderThickness = new Thickness(selected ? 2 : 1), CornerRadius = new CornerRadius(10), Padding = new Thickness(12), Cursor = new Cursor(StandardCursorType.Hand)
             };
             var body = new StackPanel { Spacing = 6 };
-            body.Children.Add(Caption("▣ " + fragment.Title));
-            body.Children.Add(Note($"{fragment.Segments.Count} 句 · {fragment.ChoiceTrees.Count} 棵选项树"));
-            body.Children.Add(new TextBlock { Text = StoryTargets.Short(fragment.Segments[0].Text, 75), TextWrapping = TextWrapping.Wrap, MaxLines = 3 });
+            var check = new CheckBox { Content = "▣ " + fragment.Title, IsChecked = selected };
+            check.IsCheckedChanged += (_, _) => Attempt(() =>
+            {
+                Commit();
+                if (check.IsChecked == true) _bagSelection.Add(fragment.Id); else _bagSelection.Remove(fragment.Id);
+                _fragmentId = _bagSelection.Contains(fragment.Id) ? fragment.Id : _bagSelection.FirstOrDefault();
+                _sentenceId = null; _lineEditor = false; Render();
+            });
+            body.Children.Add(check);
+            body.Children.Add(Note($"{fragment.Segments.Sum(segment => segment.Text.Length)} 字 · {fragment.ChoiceTrees.Count} 棵选项树 · 一份完整文本"));
+            body.Children.Add(new TextBlock { Text = StoryTargets.Short(StoryFragmentEditor.TextOf(fragment), 120), TextWrapping = TextWrapping.Wrap, MaxLines = 3 });
             var next = StoryTargets.For(_project).FirstOrDefault(target => target.Id == fragment.NextNodeId)?.Name;
             body.Children.Add(Note(next is null ? "后续：剧情结束" : "后续 → " + next));
             card.Child = body;
@@ -164,23 +180,59 @@ public sealed class FragmentBagWindow : Window
             {
                 if (!Inside(_mainPanel, e)) return;
                 Restore(fragment.Id, DropIndex(e));
-            }, () => { Commit(); _fragmentId = fragment.Id; _sentenceId = fragment.Segments[0].Id; Render(); });
+            }, e =>
+            {
+                Commit();
+                if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0)
+                { if (!_bagSelection.Add(fragment.Id)) _bagSelection.Remove(fragment.Id); }
+                else { _bagSelection.Clear(); _bagSelection.Add(fragment.Id); }
+                _fragmentId = _bagSelection.Contains(fragment.Id) ? fragment.Id : _bagSelection.FirstOrDefault();
+                _sentenceId = null; _lineEditor = false; Render();
+            });
+            var remove = new MenuItem { Header = "删除所选素材…" };
+            remove.Click += (_, _) => ConfirmDelete(_bagSelection.ToList());
+            card.ContextMenu = new ContextMenu { ItemsSource = new[] { remove } };
+            card.ContextMenu.Opened += (_, _) => _status.Text = "右键菜单已打开：可删除所选素材，删除前会再次确认。";
+            card.ContextMenu.Closed += (_, _) => Render();
+            card.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(card).Properties.IsRightButtonPressed) return;
+                Attempt(() =>
+                {
+                    Commit();
+                    if (!_bagSelection.Contains(fragment.Id))
+                    {
+                        _bagSelection.Clear(); _bagSelection.Add(fragment.Id); _fragmentId = fragment.Id;
+                        _sentenceId = null; _lineEditor = false; RenderDetails();
+                        _deleteSelected.IsEnabled = true; _deleteSelected.Content = "删除所选 1 份素材";
+                        card.BorderBrush = Brush.Parse("#527EB9"); card.BorderThickness = new Thickness(2);
+                    }
+                    remove.Header = $"删除所选 {_bagSelection.Count} 份素材…";
+                });
+                e.Handled = true;
+            };
+            card.PointerReleased += (_, e) =>
+            {
+                if (e.InitialPressMouseButton != MouseButton.Right) return;
+                e.Handled = true;
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => card.ContextMenu?.Open(card));
+            };
             _bag.Children.Add(card);
         }
-        if (_project.Fragments.Count == 0) _bag.Children.Add(Note("袋子还是空的。收纳文字后会在这里出现节点卡片。"));
+        if (_project.Fragments.Count == 0) _bag.Children.Add(Note("袋子还是空的。新建文本，或整篇收纳已校正正文，即可生成文本节点卡片。"));
         RenderDetails();
         UiMotion.Reveal(_bag);
-        _status.Text = $"主线 {_project.Segments.Count} 句 · 素材袋 {_project.Fragments.Count} 个片段。收纳不修改原稿，可在应用后使用主窗口撤销。";
+        _status.Text = $"素材袋 {_project.Fragments.Count} 份文本 · 已选 {_bagSelection.Count} 份。勾选 / Ctrl（Mac Cmd）点击多选；支持右键删除和右侧删除按钮。";
         _status.Foreground = Brush.Parse("#64786D");
     }
 
-    private void StashSelection()
+    private void StashMain()
     {
         Commit();
         // Validate before recording history; failed moves leave the project untouched.
         var snapshot = JsonSerializer.Serialize(_project);
-        var fragment = StoryFragmentEditor.Stash(_project, _selection.ToList());
-        _history.Push(snapshot); _selection.Clear(); _fragmentId = fragment.Id; _sentenceId = fragment.Segments[0].Id; Render();
+        var fragment = StoryFragmentEditor.StashMain(_project, string.IsNullOrWhiteSpace(_project.SourceFile) ? "已校正文本" : Path.GetFileNameWithoutExtension(_project.SourceFile));
+        _history.Push(snapshot); _bagSelection.Clear(); _bagSelection.Add(fragment.Id); _fragmentId = fragment.Id; _sentenceId = fragment.Segments[0].Id; Render();
     }
     private void Restore(string fragmentId, int index)
     {
@@ -188,8 +240,7 @@ public sealed class FragmentBagWindow : Window
     }
     private int DropIndex(PointerEventArgs e)
     {
-        foreach (var (card, index) in _mainCards)
-            if (Inside(card, e)) return index + (e.GetPosition(card).Y >= card.Bounds.Height / 2 ? 1 : 0);
+        if (_mainCard is { } card && Inside(card, e) && e.GetPosition(card).Y < card.Bounds.Height / 2) return 0;
         return _project.Segments.Count;
     }
     private static bool Inside(Control control, PointerEventArgs e)
@@ -197,13 +248,14 @@ public sealed class FragmentBagWindow : Window
         var p = e.GetPosition(control);
         return p.X >= 0 && p.Y >= 0 && p.X <= control.Bounds.Width && p.Y <= control.Bounds.Height;
     }
-    private void AttachDrag(Control card, Action<PointerEventArgs> drop, Action? click = null)
+    private void AttachDrag(Control card, Action<PointerEventArgs> drop, Action<PointerEventArgs>? click = null)
     {
         card.Classes.Add("motion-card");
         Point? start = null; var dragged = false;
         card.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(card).Properties.IsLeftButtonPressed) return;
+            if (e.Source is Visual visual && visual.GetVisualAncestors().Prepend(visual).TakeWhile(item => !ReferenceEquals(item, card)).Any(item => item is CheckBox or Button)) return;
             start = e.GetPosition(this); dragged = false; e.Pointer.Capture(card); e.Handled = true;
         };
         card.PointerMoved += (_, e) =>
@@ -214,14 +266,14 @@ public sealed class FragmentBagWindow : Window
             dragged = true; card.Opacity = 0.65;
             _bagPanel.BorderBrush = Brush.Parse(Inside(_bagPanel, e) ? "#167456" : "#DDE8DC");
             _mainPanel.BorderBrush = Brush.Parse(Inside(_mainPanel, e) ? "#527EB9" : "#DDE8DC");
-            _status.Text = Inside(_mainPanel, e) ? $"放回位置：第 {DropIndex(e) + 1} 句之前。" : "将正文拖入袋子，或将片段拖回主线。";
+            _status.Text = Inside(_mainPanel, e) ? (DropIndex(e) == 0 ? "放回位置：正文开头。" : "放回位置：正文末尾。") : "整篇正文拖入袋子，或整块文本拖回主线。";
         };
         card.PointerReleased += (_, e) =>
         {
             if (start is null) return;
             start = null; card.Opacity = 1; e.Pointer.Capture(null);
             _bagPanel.BorderBrush = _mainPanel.BorderBrush = Brush.Parse("#DDE8DC");
-            Attempt(() => { if (dragged) drop(e); else click?.Invoke(); }); e.Handled = true;
+            Attempt(() => { if (dragged) drop(e); else click?.Invoke(e); }); e.Handled = true;
         };
         card.PointerCaptureLost += (_, _) =>
         {
@@ -234,55 +286,119 @@ public sealed class FragmentBagWindow : Window
     {
         UiMotion.Reveal(_details);
         _details.Children.Clear(); _commit = null;
+        if (_bagSelection.Count > 1)
+        {
+            _details.Children.Add(Caption($"已选择 {_bagSelection.Count} 份完整文本"));
+            _details.Children.Add(Note("可用右侧顶部按钮、右键菜单或素材列表上方按钮批量删除。若只需编辑一份，点击该卡片正文以退出多选。"));
+            return;
+        }
         var fragment = _project.Fragments.FirstOrDefault(item => item.Id == _fragmentId);
-        if (fragment is null) { _details.Children.Add(Caption("片段编辑")); _details.Children.Add(Note("点击素材袋中的卡片，修改名称、文字、角色与后续连接。")); return; }
-        _details.Children.Add(Caption("片段名称"));
+        if (fragment is null) { _details.Children.Add(Caption("完整文本编辑")); _details.Children.Add(Note("新建或点击一张文本卡片，在这里编辑整份文本与后续连接。不是为每句话创建一张卡片。")); return; }
+        _details.Children.Add(Caption("文本名称"));
         var title = new TextBox { Text = fragment.Title }; _details.Children.Add(title);
         _details.Children.Add(Caption("片段结束后继续到"));
-        var targets = new List<StoryTarget> { new("", "剧情结束") };
-        targets.AddRange(StoryTargets.For(_project).Where(target => target.Id != fragment.Id));
-        var next = new ComboBox { ItemsSource = targets, SelectedItem = targets.FirstOrDefault(target => target.Id == fragment.NextNodeId) ?? targets[0], HorizontalAlignment = HorizontalAlignment.Stretch };
+        var next = new StoryTargetPicker(_project, fragment.NextNodeId, "剧情结束", fragment.Id, fragment.Id);
         _details.Children.Add(next);
-        _details.Children.Add(Note("收纳时自动连接到原片段之后的句子。也可指定其他节点继续剧情。"));
-        _details.Children.Add(ActionButton("编辑片段选项树", () => OpenFragmentChoices(fragment)));
-        _details.Children.Add(Caption("片段内的句子"));
-        foreach (var (sentence, index) in fragment.Segments.Select((sentence, index) => (sentence, index)))
+        _details.Children.Add(Note("文本作为一个节点连接选项树；内部的对话拆分仅用于 Ren’Py 播放和精细校正。"));
+        _details.Children.Add(ActionButton("编辑本文选项树", () => OpenFragmentChoices(fragment)));
+        _details.Children.Add(ActionButton(_lineEditor ? "← 返回完整文本编辑" : "展开逐句校正（角色 / 内容类型）", () => { Commit(); _lineEditor = !_lineEditor; RenderDetails(); }));
+        if (!_lineEditor)
         {
-            var select = ActionButton($"{index + 1}. {StoryTargets.Short(sentence.Text, 27)}", () => { Commit(); _sentenceId = sentence.Id; RenderDetails(); });
-            select.HorizontalAlignment = HorizontalAlignment.Stretch;
-            if (sentence.Id == _sentenceId) select.Classes.Add("soft");
-            _details.Children.Add(select);
-        }
-        var selected = fragment.Segments.FirstOrDefault(sentence => sentence.Id == _sentenceId) ?? fragment.Segments[0];
-        _sentenceId = selected.Id;
-        var kind = new ComboBox { ItemsSource = new[] { "旁白/人物动作或其他", "对白", "场景 / 舞台说明" }, SelectedIndex = (int)selected.Kind, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var speaker = new TextBox { Text = selected.Speaker, Watermark = "说话人（对白时使用）" };
-        var text = new TextBox { Text = selected.Text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 140, MaxHeight = 260 };
-        var include = new CheckBox { Content = "包含在导出中", IsChecked = selected.Include };
-        _details.Children.Add(kind); _details.Children.Add(speaker); _details.Children.Add(text); _details.Children.Add(include);
-        _commit = () =>
-        {
-            fragment.Title = string.IsNullOrWhiteSpace(title.Text) ? "未命名片段" : title.Text.Trim();
-            fragment.NextNodeId = (next.SelectedItem as StoryTarget)?.Id ?? "";
-            var newKind = (SegmentKind)Math.Max(0, kind.SelectedIndex);
-            var newSpeaker = newKind == SegmentKind.Dialogue ? (speaker.Text ?? "").Trim() : "";
-            if (selected.Text != text.Text || selected.Kind != newKind || selected.Speaker != newSpeaker) selected.Reviewed = false;
-            selected.Text = text.Text ?? ""; selected.Kind = newKind; selected.Speaker = newSpeaker; selected.Include = include.IsChecked == true;
-        };
-        _details.Children.Add(ActionButton("更新片段", () => { Commit(); Render(); }, true));
-        var move = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var direction in new[] { -1, 1 })
-            move.Children.Add(ActionButton(direction < 0 ? "↑ 上移此句" : "↓ 下移此句", () =>
+            _details.Children.Add(Caption("完整文本"));
+            _details.Children.Add(Note("空行分隔内部对话块；修改已有块保留角色和跳转位置，增加空行可添加新块。"));
+            var fullText = new TextBox { Text = StoryFragmentEditor.TextOf(fragment), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 300, MaxHeight = 440 };
+            _details.Children.Add(fullText);
+            _commit = () =>
             {
-                var index = fragment.Segments.IndexOf(selected); var destination = index + direction;
-                if (destination < 0 || destination >= fragment.Segments.Count) return;
-                Snapshot(); (fragment.Segments[index], fragment.Segments[destination]) = (fragment.Segments[destination], fragment.Segments[index]); Render();
-            }));
-        _details.Children.Add(move);
-        _details.Children.Add(ActionButton("取出到所选正文之前", () => Restore(fragment.Id,
-            _project.Segments.FindIndex(sentence => _selection.Contains(sentence.Id)) is var index && index >= 0 ? index : _project.Segments.Count)));
-        _details.Children.Add(ActionButton("取出到主线末尾", () => Restore(fragment.Id, _project.Segments.Count)));
-        _details.Children.Add(ActionButton("删除片段", () => ConfirmDelete(fragment)));
+                if ((title.Text?.Length ?? 0) > 4096) throw new UserFacingException("文本名称过长，请缩短名称。");
+                StoryFragmentEditor.UpdateText(_project, fragment, fullText.Text ?? "");
+                fragment.Title = string.IsNullOrWhiteSpace(title.Text) ? "未命名文本" : title.Text.Trim();
+                fragment.NextNodeId = next.SelectedId;
+            };
+        }
+        else
+        {
+            _details.Children.Add(Caption("本文内部的对话块（不单独存入素材袋）"));
+            foreach (var (sentence, index) in fragment.Segments.Select((sentence, index) => (sentence, index)))
+            {
+                var select = ActionButton($"{index + 1}. {StoryTargets.Short(sentence.Text, 27)}", () => { Commit(); _sentenceId = sentence.Id; RenderDetails(); });
+                select.HorizontalAlignment = HorizontalAlignment.Stretch;
+                if (sentence.Id == _sentenceId) select.Classes.Add("soft");
+                _details.Children.Add(select);
+            }
+            var selected = fragment.Segments.FirstOrDefault(sentence => sentence.Id == _sentenceId) ?? fragment.Segments[0];
+            _sentenceId = selected.Id;
+            var kind = new ComboBox { ItemsSource = new[] { "旁白/人物动作或其他", "对白", "场景 / 舞台说明" }, SelectedIndex = (int)selected.Kind, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var speaker = new TextBox { Text = selected.Speaker, Watermark = "说话人（对白时使用）" };
+            var text = new TextBox { Text = selected.Text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 140, MaxHeight = 260 };
+            var include = new CheckBox { Content = "包含在导出中", IsChecked = selected.Include };
+            _details.Children.Add(kind); _details.Children.Add(speaker); _details.Children.Add(text); _details.Children.Add(include);
+            _commit = () =>
+            {
+                if ((title.Text?.Length ?? 0) > 4096) throw new UserFacingException("文本名称过长，请缩短名称。");
+                fragment.Title = string.IsNullOrWhiteSpace(title.Text) ? "未命名文本" : title.Text.Trim();
+                fragment.NextNodeId = next.SelectedId;
+                var newKind = (SegmentKind)Math.Max(0, kind.SelectedIndex);
+                var newSpeaker = newKind == SegmentKind.Dialogue ? (speaker.Text ?? "").Trim() : "";
+                if (selected.Text != text.Text || selected.Kind != newKind || selected.Speaker != newSpeaker) selected.Reviewed = false;
+                selected.Text = text.Text ?? ""; selected.Kind = newKind; selected.Speaker = newSpeaker; selected.Include = include.IsChecked == true;
+            };
+        }
+        _details.Children.Add(ActionButton("更新整份文本", () => { Commit(); Render(); }, true));
+        _details.Children.Add(ActionButton("整块取出到正文开头", () => Restore(fragment.Id, 0)));
+        _details.Children.Add(ActionButton("整块取出到正文末尾", () => Restore(fragment.Id, _project.Segments.Count)));
+        _details.Children.Add(ActionButton("删除整份文本", () => ConfirmDelete([fragment.Id])));
+    }
+
+    private async void OpenNewText()
+    {
+        try
+        {
+            Commit();
+            var dialog = new Window { Title = "添加一份完整文本", Width = 760, Height = 700, MinHeight = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Background };
+            var layout = new Grid { Margin = new Thickness(22), RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto,Auto") };
+            var title = new TextBox { Watermark = "文本名称，例如：第一章 / 雨夜路线", Margin = new Thickness(0, 8) };
+            var text = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Watermark = "在这里输入或粘贴整份文本，也可以导入 TXT、DOCX、Markdown。", Margin = new Thickness(0, 10) };
+            var split = new ComboBox { ItemsSource = new[] { "内部按段落播放", "内部按句子播放", "内部按阅读长度播放" }, SelectedIndex = (int)_project.Options.Split };
+            var hint = Note("无论内部拆分成多少条对话，素材袋中都只创建一张文本卡片。新文本默认旁白，可后续逐句校正角色。");
+            layout.Children.Add(Caption("新建 / 导入完整文本"));
+            Grid.SetRow(title, 1); layout.Children.Add(title);
+            var import = new Button { Content = "导入文本文件…" };
+            import.Click += async (_, _) =>
+            {
+                try
+                {
+                    var files = await dialog.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "导入到素材袋", FileTypeFilter = [new("稿件（TXT / DOCX / Markdown）") { Patterns = ["*.txt", "*.text", "*.docx", "*.md", "*.markdown"] }] });
+                    if (files.Count == 0) return;
+                    if (files[0].TryGetLocalPath() is not { } path) throw new UserFacingException("请选择本地文件。");
+                    var document = await Task.Run(() => DocumentImporter.Read(path));
+                    text.Text = document.Text; title.Text = Path.GetFileNameWithoutExtension(document.FileName);
+                    hint.Text = "文件已读入，点击添加后生成一张文本卡片。" + string.Join("；", document.Warnings);
+                }
+                catch (Exception ex) { hint.Text = ex.Message; if (ex is not UserFacingException) ErrorLog.Write(ex); }
+            };
+            Grid.SetRow(import, 2); layout.Children.Add(import);
+            Grid.SetRow(text, 3); layout.Children.Add(text);
+            var options = new StackPanel { Spacing = 8 }; options.Children.Add(split); options.Children.Add(hint); Grid.SetRow(options, 4); layout.Children.Add(options);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 10, Margin = new Thickness(0, 14, 0, 0) };
+            var cancel = new Button { Content = "取消" }; cancel.Click += (_, _) => dialog.Close(false);
+            var add = new Button { Content = "添加整份文本", Classes = { "primary" } };
+            add.Click += (_, _) =>
+            {
+                try
+                {
+                    var before = JsonSerializer.Serialize(_project);
+                    var fragment = StoryFragmentEditor.AddText(_project, title.Text ?? "", text.Text ?? "", (SplitMode)Math.Max(0, split.SelectedIndex));
+                    _history.Push(before); _bagSelection.Clear(); _bagSelection.Add(fragment.Id); _fragmentId = fragment.Id; _sentenceId = fragment.Segments[0].Id; _lineEditor = false;
+                    dialog.Close(true);
+                }
+                catch (UserFacingException ex) { hint.Text = ex.Message; }
+            };
+            actions.Children.Add(cancel); actions.Children.Add(add); Grid.SetRow(actions, 5); layout.Children.Add(actions); dialog.Content = layout;
+            UiMotion.Attach(dialog);
+            if (await dialog.ShowDialog<bool>(this)) Render();
+        }
+        catch (Exception ex) { _status.Text = "操作失败：" + ex.Message; if (ex is not UserFacingException) ErrorLog.Write(ex); }
     }
 
     private async void OpenFragmentChoices(StoryFragment fragment)
@@ -297,23 +413,26 @@ public sealed class FragmentBagWindow : Window
         catch (Exception ex) { _status.Text = "操作失败：" + ex.Message; if (ex is not UserFacingException) ErrorLog.Write(ex); }
     }
 
-    private async void ConfirmDelete(StoryFragment fragment)
+    private async void ConfirmDelete(IReadOnlyCollection<string> ids)
     {
         try
         {
             Commit();
-            var dialog = new Window { Title = "删除素材片段？", Width = 440, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            if (ids.Count == 0) throw new UserFacingException("请先勾选要删除的素材文本。");
+            var chosen = ids.ToHashSet(StringComparer.Ordinal);
+            var fragments = _project.Fragments.Where(fragment => chosen.Contains(fragment.Id)).ToList();
+            var dialog = new Window { Title = "删除所选素材？", Width = 440, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var content = new StackPanel { Spacing = 15, Margin = new Thickness(22) };
-            content.Children.Add(new TextBlock { Text = $"删除“{fragment.Title}”及其中的 {fragment.Segments.Count} 句和选项树？原始稿件会保留，可在此窗口撤销删除。", TextWrapping = TextWrapping.Wrap });
+            content.Children.Add(new TextBlock { Text = $"删除所选 {ids.Count} 份完整文本及内部选项树？\n{string.Join("、", fragments.Take(5).Select(fragment => fragment.Title))}\n可在此窗口撤销删除；取消窗口不会写回工程。", TextWrapping = TextWrapping.Wrap });
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             var cancel = new Button { Content = "取消" }; cancel.Click += (_, _) => dialog.Close(false);
-            var remove = new Button { Content = "删除片段" }; remove.Click += (_, _) => dialog.Close(true);
+            var remove = new Button { Content = "删除所选" }; remove.Click += (_, _) => dialog.Close(true);
             actions.Children.Add(cancel); actions.Children.Add(remove); content.Children.Add(actions); dialog.Content = content;
             UiMotion.Attach(dialog);
             if (!await dialog.ShowDialog<bool>(this)) { RenderDetails(); return; }
             var snapshot = JsonSerializer.Serialize(_project);
-            StoryFragmentEditor.Delete(_project, fragment.Id); _history.Push(snapshot);
-            _fragmentId = _sentenceId = null; Render();
+            StoryFragmentEditor.DeleteMany(_project, ids); _history.Push(snapshot);
+            _bagSelection.Clear(); _fragmentId = _sentenceId = null; Render();
         }
         catch (Exception ex) { _status.Text = "操作失败：" + ex.Message; if (ex is not UserFacingException) ErrorLog.Write(ex); }
     }

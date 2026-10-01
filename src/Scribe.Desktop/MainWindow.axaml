@@ -4,7 +4,7 @@
     <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,20">
       <StackPanel Orientation="Horizontal" Spacing="14">
         <Border Background="#236752" CornerRadius="12" Width="48" Height="48"><TextBlock Text="幕" Foreground="White" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-        <StackPanel Spacing="2"><TextBlock Text="句幕" FontSize="24" FontWeight="Bold"/><TextBlock Text="REN’PY SCRIPT IMPORTER  /  0.4.1" Classes="muted" FontSize="10" LetterSpacing="1.4"/></StackPanel>
+        <StackPanel Spacing="2"><TextBlock Text="句幕" FontSize="24" FontWeight="Bold"/><TextBlock Text="REN’PY SCRIPT IMPORTER  /  0.4.3" Classes="muted" FontSize="10" LetterSpacing="1.4"/></StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
         <Button Name="HelpButton" Content="使用说明"/>
@@ -56,13 +56,14 @@
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
           <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,14"><TextBlock Text="02  识别结果" Classes="caption"/><Button Grid.Column="1" Name="UndoButton" Content="撤销" Padding="10,3" FontSize="12"/></Grid>
           <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,12"><TextBox Name="SearchBox" Watermark="搜索角色或正文…"/><CheckBox Name="PendingOnly" Grid.Column="1" Content="待确认" Margin="12,0,0,0"/></Grid>
-          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+          <WrapPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10" ItemSpacing="8" LineSpacing="6">
             <Button Name="SelectVisibleButton" Content="全选当前结果" FontSize="11" Padding="8,4"/>
             <Button Name="ReviewSelectedButton" Content="审核所选" FontSize="11" Padding="8,4" Classes="soft"/>
             <Button Name="ClearSelectionButton" Content="清除多选" FontSize="11" Padding="8,4"/>
+            <Button Name="DeleteSelectedButton" Content="删除所选" FontSize="11" Padding="8,4" IsEnabled="False"/>
             <TextBlock Name="SelectionCount" Text="已选 0 条" Classes="muted" FontSize="11" VerticalAlignment="Center"/>
             <TextBlock Text="点击/拖动可多选 · Shift 选范围" Classes="muted" FontSize="11" VerticalAlignment="Center"/>
-          </StackPanel>
+          </WrapPanel>
           <StackPanel Grid.Row="3" Spacing="4" Margin="0,0,0,10">
             <Grid ColumnDefinitions="*,Auto">
               <TextBox Name="QuickChoiceText" Watermark="输入选项文字"/>
@@ -90,9 +91,10 @@
         </Grid>
       </Border>
       <Border Grid.Column="4" Classes="panel" Padding="16">
-        <Grid RowDefinitions="Auto,*">
+        <Grid RowDefinitions="Auto,Auto,*">
           <TextBlock Text="03  逐句校正" Classes="caption" Margin="0,0,0,18"/>
-          <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+          <Button Grid.Row="1" Name="DeleteSegmentButton" Content="删除所选句子" HorizontalAlignment="Stretch" Margin="0,0,0,12" IsEnabled="False"/>
+          <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Name="EditorPanel" Spacing="11" IsEnabled="False">
               <TextBlock Name="SelectionInfo" Text="选择一条识别结果" Classes="muted" TextWrapping="Wrap"/>
               <TextBlock Text="内容类型" Classes="caption"/><ComboBox Name="KindChoice" HorizontalAlignment="Stretch"><ComboBoxItem Content="旁白/人物动作或其他"/><ComboBoxItem Content="对白"/><ComboBoxItem Content="场景 / 舞台说明"/></ComboBox>
@@ -102,10 +104,10 @@
               <Border Background="#FFF7E6" CornerRadius="8" Padding="10"><TextBlock Name="WarningText" Text="" Foreground="#86642B" FontSize="12" TextWrapping="Wrap" LineHeight="20"/></Border>
               <CheckBox Name="IncludeCheck" Content="包含在导出中" IsChecked="True"/>
               <Button Name="ApplyButton" Content="应用修改并确认" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-              <Grid ColumnDefinitions="*,6,*,6,*"><Button Name="MoveUpButton" Content="↑ 上移" FontSize="12" Padding="6" HorizontalAlignment="Stretch"/><Button Name="MoveDownButton" Grid.Column="2" Content="↓ 下移" FontSize="12" Padding="6" HorizontalAlignment="Stretch"/><Button Name="DeleteSegmentButton" Grid.Column="4" Content="删除句子" FontSize="12" Padding="6" HorizontalAlignment="Stretch"/></Grid>
+              <Grid ColumnDefinitions="*,6,*"><Button Name="MoveUpButton" Content="↑ 上移" FontSize="12" Padding="6" HorizontalAlignment="Stretch"/><Button Name="MoveDownButton" Grid.Column="2" Content="↓ 下移" FontSize="12" Padding="6" HorizontalAlignment="Stretch"/></Grid>
               <Grid ColumnDefinitions="*,8,*"><Button Name="SplitButton" Content="在光标处拆分" FontSize="12" Padding="8" HorizontalAlignment="Stretch"/><Button Name="MergeButton" Grid.Column="2" Content="合并下一条" FontSize="12" Padding="8" HorizontalAlignment="Stretch"/></Grid>
               <Grid ColumnDefinitions="*,8,*"><Button Name="AddChoiceBeforeButton" Content="在本句前添加选项" FontSize="12" Padding="8" HorizontalAlignment="Stretch"/><Button Name="AddChoiceAfterButton" Grid.Column="2" Content="在本句后添加选项" FontSize="12" Padding="8" HorizontalAlignment="Stretch"/></Grid>
-              <TextBlock Text="单句可上移、下移或删除；列表中也可按 Alt+↑ / Alt+↓ / Delete。移动时选项树跟随句子；删除关联选项树前会提示。多选只批量应用改动过的字段。" Classes="muted" TextWrapping="Wrap" LineHeight="20"/>
+              <TextBlock Text="支持多选删除、右键删除或 Delete；右侧顶部可删除所选。单句可按 Alt+↑ / Alt+↓ 移动；关联选项树删除前会提示。多选只批量应用改动过的字段。" Classes="muted" TextWrapping="Wrap" LineHeight="20"/>
               <Border BorderBrush="#DFE6DD" BorderThickness="0,1,0,0" Margin="0,4,0,0" Padding="0,12,0,0"><StackPanel Spacing="8"><TextBlock Text="原文定位" Classes="caption"/><TextBlock Name="OriginalSnippet" FontSize="12" Foreground="#6E8079" TextWrapping="Wrap" MaxHeight="130"/></StackPanel></Border>
             </StackPanel>
           </ScrollViewer>
