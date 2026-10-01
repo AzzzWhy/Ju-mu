@@ -60,6 +60,7 @@ public sealed class ImportedDocument
 public sealed class ExportOptions
 {
     public string Label { get; set; } = "imported_story";
+    public bool CreateStartLabel { get; set; }
     public bool DirectionAsComments { get; set; } = true;
     public Dictionary<string, string> CharacterVariables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

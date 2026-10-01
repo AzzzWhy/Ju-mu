@@ -636,7 +636,7 @@ public partial class MainWindow : Window
             throw new UserFacingException("选项树中有空白句子，请在选项树里填写内容或删除该句子。");
         var pending = _project.Segments.Concat(branchSegments).Count(s => s.Include && !s.Reviewed &&
             (s.Warnings.Count > 0 || (s.Kind == SegmentKind.Dialogue && string.IsNullOrWhiteSpace(s.Speaker))));
-        if (pending > 0 && !await Dialog("还有待确认内容", $"有 {pending} 条内容需要检查。未指定说话人的对白会使用临时显示名导出。你可以返回校正，或导出当前草稿。", "导出草稿", "返回校正")) return;
+        if (pending > 0 && !await Dialog("还有待确认内容", $"有 {pending} 条内容需要检查。未指定说话人的对白会使用旁白代号 s 导出。你可以返回校正，或导出当前草稿。", "导出草稿", "返回校正")) return;
         _ = RenpyExporter.Generate(_project.Segments, _project.Export, _project.ChoiceTrees);
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "导出至 Ren’Py 项目的 game 文件夹", SuggestedFileName = _project.Export.Label + ".rpy", DefaultExtension = "rpy", FileTypeChoices = [new("Ren’Py 剧本") { Patterns = ["*.rpy"] }], ShowOverwritePrompt = true });
         var path = file?.TryGetLocalPath(); if (path == null) return;
@@ -644,9 +644,27 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(_project.SourceFile) && Path.GetFullPath(path) == Path.GetFullPath(_project.SourceFile)) throw new UserFacingException("导出文件不能覆盖原始稿件，请换一个文件名。");
         var overwrite = File.Exists(path);
         if (overwrite && !await Dialog("覆盖已有脚本？", "将替换选定的 .rpy 文件，并在旁边保留带时间的备份。已有演出、分支等内容不会自动合并。", "备份并覆盖", "取消")) return;
+        var createsStart = _project.Export.CreateStartLabel || _project.Export.Label == "start";
+        if (string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "game", StringComparison.OrdinalIgnoreCase))
+        {
+            var existingStart = RenpyProjectInspector.FindStartLabel(path);
+            if (existingStart is not null && createsStart)
+                throw new UserFacingException($"工程中已有 label start：{existingStart}。请在「角色与导出设置」中关闭自动生成 start，或改用其他入口 label，避免重复定义。");
+            if (existingStart is null && !createsStart && await Dialog("工程缺少 start 入口", "当前 game 文件夹未找到 label start。Ren’Py 点击 Start 时需要这个入口。要让本次导出的脚本自动生成 start 并调用剧情吗？", "自动生成 start", "保持原样，稍后手动添加"))
+            {
+                PushUndo();
+                _project.Export.CreateStartLabel = true;
+                _dirty = true;
+                createsStart = true;
+                UpdatePreview();
+            }
+        }
         RenpyExporter.Write(path, _project.Segments, _project.Export, overwrite, _project.ChoiceTrees);
         SetStatus("导出成功：" + path);
-        await Dialog("剧本已导出", "文件：" + path + "\n\n将文件放进 Ren’Py 项目的 game 文件夹，并在已有的 label start 中添加：\n\n    call " + _project.Export.Label + "\n\n同一项目内的 label 名称必须唯一。角色中文显示还需要项目配置中文字体。", "完成");
+        var entryHint = createsStart
+            ? "脚本已包含 label start，可作为没有其他 start 的新项目入口；不要再与另一个 start 放进同一工程。"
+            : "如工程尚无 label start，请在 game 文件夹新建一个入口脚本，并写入：\n\nlabel start:\n    call " + _project.Export.Label + "\n    return";
+        await Dialog("剧本已导出", "文件：" + path + "\n\n" + entryHint + "\n\n角色中文显示还需要项目配置中文字体。", "完成");
     }
 
     private async Task SettingsAsync()
@@ -656,8 +674,11 @@ public partial class MainWindow : Window
         var aliases = new TextBox { Text = string.Join("\n", _project.Options.Aliases.Select(x => x.Key + "=" + x.Value)), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 115, Watermark = "小林=林夏\n阿夏=林夏\nAlice=Alice" };
         var variables = new TextBox { Text = string.Join("\n", _project.Export.CharacterVariables.Select(x => x.Key + "=" + x.Value)), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 100, Watermark = "林夏=lx\nAlice=alice" };
         var comments = new CheckBox { Content = "舞台说明以注释导出", IsChecked = _project.Export.DirectionAsComments };
+        var createStart = new CheckBox { Content = "为没有 start 的新项目生成启动入口", IsChecked = _project.Export.CreateStartLabel };
         var body = new StackPanel { Spacing = 10 };
         body.Children.Add(new TextBlock { Text = "入口 label", FontWeight = FontWeight.SemiBold }); body.Children.Add(label);
+        body.Children.Add(createStart);
+        body.Children.Add(new TextBlock { Text = "已有 label start 的工程不要勾选；导出到 game 文件夹时也会检查并提示。", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         body.Children.Add(new TextBlock { Text = "角色别名（每行：别名=正式名）", FontWeight = FontWeight.SemiBold }); body.Children.Add(aliases);
         body.Children.Add(new TextBlock { Text = "别名也可以帮助识别短角色名；修改后需重新解析。", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         body.Children.Add(new TextBlock { Text = "已有 Ren’Py 角色变量（可选，每行：正式名=变量）", FontWeight = FontWeight.SemiBold }); body.Children.Add(variables);
@@ -675,7 +696,7 @@ public partial class MainWindow : Window
             return d;
         }
         var newAliases = Map(aliases.Text); var newVars = Map(variables.Text);
-        var settings = new ExportOptions { Label = (label.Text ?? "").Trim(), CharacterVariables = newVars, DirectionAsComments = comments.IsChecked == true };
+        var settings = new ExportOptions { Label = (label.Text ?? "").Trim(), CreateStartLabel = createStart.IsChecked == true, CharacterVariables = newVars, DirectionAsComments = comments.IsChecked == true };
         _ = RenpyExporter.Generate([new Segment { Text = "预览" }], settings);
         PushUndo();
         if (JsonSerializer.Serialize(_project.Options.Aliases) != JsonSerializer.Serialize(newAliases) && _project.Segments.Count > 0) _sourceStale = true;
@@ -695,7 +716,7 @@ public partial class MainWindow : Window
         _projectPath = null; _dirty = true; _manualEdits = false; _undo.Clear(); _selected = null; SetProjectControls(); await ParseAsync();
     }
 
-    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。只选中一句时，右侧可上移、下移或删除；焦点在句子列表时也可用 Alt+↑ / Alt+↓ / Delete。关联选项树随移动句子一起移动；删除前会确认。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹，在已有 start 中 call 对应 label。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；不会自动创建变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
+    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。只选中一句时，右侧可上移、下移或删除；焦点在句子列表时也可用 Alt+↑ / Alt+↓ / Delete。关联选项树随移动句子一起移动；删除前会确认。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹。已有 label start 的工程，在其中 call 对应剧情 label；没有 start 的新工程可在设置中勾选生成启动入口，导出时也会检查并提示。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；导出时自动定义说话人角色变量，旁白使用 s，但不会自动创建剧情状态变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
 
     private Task<bool> Dialog(string title, string text, string accept, string? cancel = null) => CustomDialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 24 }, accept, cancel);
     private async Task<bool> CustomDialog(string title, Control body, string accept, string? cancel, double width = 540)

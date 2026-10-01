@@ -344,6 +344,32 @@ Test("导出：未确定说话人的对白用 s 且继续提示人工确认", ()
     Contains("# 待确认：原文第 3 段的说话人未确定。", script);
     Contains("s \"是谁？\"", script);
 });
+Test("导出：可为新项目生成唯一的 start 入口", () =>
+{
+    var options = new ExportOptions { CreateStartLabel = true };
+    var script = RenpyExporter.Generate([Narration("开场。")], options);
+    InOrder(script, "label start:\n    call imported_story\n    return", "label imported_story:", "s \"开场。\"");
+    Equal(1, script.Split("label start:", StringSplitOptions.None).Length - 1);
+    var direct = RenpyExporter.Generate([Narration("开场。")], new ExportOptions { Label = "start", CreateStartLabel = true });
+    Equal(1, direct.Split("label start:", StringSplitOptions.None).Length - 1);
+    True(!direct.Contains("call start", StringComparison.Ordinal), "入口本身是 start 时不应调用自己");
+    var path = PathFor("start-setting.jumu");
+    ProjectStorage.Save(path, new ProjectDocument { SourceText = "开场。", Segments = [Narration("开场。")], Export = options });
+    True(ProjectStorage.Load(path).Export.CreateStartLabel, "工程应保留启动入口设置");
+});
+Test("导出：检查 game 文件夹中已有的 start，忽略注释和即将覆盖的文件", () =>
+{
+    var game = PathFor("inspect-game");
+    var nested = Path.Combine(game, "chapter");
+    Directory.CreateDirectory(nested);
+    var target = Path.Combine(game, "imported_story.rpy");
+    File.WriteAllText(target, "label start:\n    return\n");
+    File.WriteAllText(Path.Combine(game, "comment.rpy"), "# label start:\nlabel another:\n    return\n");
+    Equal<string?>(null, RenpyProjectInspector.FindStartLabel(target));
+    var existing = Path.Combine(nested, "script.rpy");
+    File.WriteAllText(existing, "label start:\n    return\n");
+    Equal(existing, RenpyProjectInspector.FindStartLabel(target));
+});
 Test("导出：角色代号冲突自动编号，恶意姓名不能插入脚本", () =>
 {
     var script = RenpyExporter.Generate([
@@ -744,6 +770,11 @@ if (failed == 0 && args.Length == 2 && args[0] == "--renpy-fixture")
     File.WriteAllText(Path.Combine(game, "imported_story.rpy"), script, new UTF8Encoding(false));
     File.WriteAllText(Path.Combine(game, "script.rpy"), "define config.name = \"Scribe export validation\"\nlabel start:\n    call imported_story\n    return\n", new UTF8Encoding(false));
     Console.WriteLine("Ren'Py fixture: " + game);
+    var standalone = Path.Combine(Path.GetFullPath(args[1]), "standalone", "game");
+    Directory.CreateDirectory(standalone);
+    File.WriteAllText(Path.Combine(standalone, "imported_story.rpy"),
+        RenpyExporter.Generate(tricky, new ExportOptions { CreateStartLabel = true }, [fixtureTree]), new UTF8Encoding(false));
+    Console.WriteLine("Ren'Py start fixture: " + Path.GetDirectoryName(standalone));
 }
 return failed == 0 ? 0 : 1;
 
