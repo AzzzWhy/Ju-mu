@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private HashSet<Segment> _dragBase = [];
     private readonly Stack<string> _undo = new();
     private bool _loading, _refreshing, _dirty, _manualEdits, _sourceStale, _closingAllowed, _busy;
+    private string? _motionSelectionId;
     private string? _projectPath;
     private T C<T>(string name) where T : Control => this.FindControl<T>(name)!;
     private TextBox Source => C<TextBox>("SourceBox");
@@ -32,12 +33,15 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        UiMotion.Attach(this);
+        C<CheckBox>("MotionCheck").IsCheckedChanged += (_, _) => UiMotion.SetEnabled(C<CheckBox>("MotionCheck").IsChecked == true);
         Rows.SelectionMode = SelectionMode.Multiple | SelectionMode.Toggle;
         On("ImportButton", ImportAsync); On("SampleButton", LoadSampleAsync);
         On("ParseButton", ParseAsync); On("ExportButton", ExportAsync);
         On("SaveProjectButton", SaveAsync); On("OpenProjectButton", OpenProjectAsync);
         On("SettingsButton", SettingsAsync); On("HelpButton", HelpAsync);
         On("ChoiceTreeButton", () => OpenChoiceTreeAsync());
+        On("FragmentBagButton", OpenFragmentBagAsync);
         On("QuickAddChoiceButton", QuickAddChoiceAsync);
         On("AddChoiceBeforeButton", () => OpenChoiceTreeAsync(ChoicePlacement.Before));
         On("AddChoiceAfterButton", () => OpenChoiceTreeAsync(ChoicePlacement.After));
@@ -107,7 +111,8 @@ public partial class MainWindow : Window
         };
         Source.TextChanged += (_, _) =>
         {
-            if (_loading) return;
+            // Avalonia may deliver programmatic changes after loading has finished.
+            if (_loading || (Source.Text ?? "") == _project.SourceText) return;
             _dirty = true; _sourceStale = true;
             C<TextBlock>("SourceCount").Text = $"{(Source.Text ?? "").Length:N0} 字";
             C<TextBlock>("SourceHint").Text = "原文已修改，请重新解析后导出。";
@@ -241,6 +246,7 @@ public partial class MainWindow : Window
             .Concat(_project.Export.CharacterVariables.Keys)
             .Concat(_project.Segments.Select(s => s.Speaker))
             .Concat(ChoiceSegments(_project.ChoiceTrees).Select(s => s.Speaker))
+            .Concat(_project.Fragments.SelectMany(fragment => fragment.Segments.Concat(ChoiceSegments(fragment.ChoiceTrees))).Select(s => s.Speaker))
             .Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var previous = _loading; _loading = true;
@@ -292,6 +298,7 @@ public partial class MainWindow : Window
     {
         if (_loading) return;
         UpdateModeHint();
+        if (JsonSerializer.Serialize(CurrentOptions()) == JsonSerializer.Serialize(_project.Options)) return;
         if (string.IsNullOrWhiteSpace(Source.Text)) return;
         _sourceStale = true; _dirty = true;
         SetStatus("解析设置已修改，点击「解析文本」应用。重新解析前会提示已有校正。");
@@ -372,7 +379,7 @@ public partial class MainWindow : Window
         var text = Source.Text ?? "";
         if (string.IsNullOrWhiteSpace(text)) throw new UserFacingException("请先导入文件，或者将稿件粘贴到左侧原文框。");
         if (text.Length > 2_000_000) throw new UserFacingException("稿件超过 200 万字符，请按章节分开导入。");
-        if ((_manualEdits || _project.ChoiceTrees.Count > 0) && !await Dialog("重新解析？", "重新解析会替换手动校正的结果和选项树。建议先保存工程，也可以在解析后使用「撤销」。", "重新解析", "取消")) return;
+        if ((_manualEdits || _project.ChoiceTrees.Count > 0 || _project.Fragments.Count > 0) && !await Dialog("重新解析？", "重新解析会用完整原稿替换主线校正和主线选项树。素材袋会保留，但指向旧主线的跳转连接会清除。建议先保存工程，也可以在解析后使用「撤销」。", "重新解析", "取消")) return;
         var options = CurrentOptions();
         _busy = true; IsEnabled = false; SetStatus("正在解析，请稍候…");
         try
@@ -380,9 +387,10 @@ public partial class MainWindow : Window
             var result = await Task.Run(() => ManuscriptParser.Parse(text, options));
             PushUndo(); _project.SourceText = text; _project.Options = options; _project.Segments = result.Segments;
             _project.ChoiceTrees.Clear();
+            var clearedLinks = StoryFragmentEditor.ClearMissingTargets(_project);
             _selected = null; _dirty = true; _manualEdits = false; _sourceStale = false; _project.RequiresReparse = false;
             Refresh(); C<TextBlock>("SourceHint").Text = "点击结果即可定位原文；所有原文保存在工程中。";
-            SetStatus($"解析完成：{result.Segments.Count} 条内容。请检查待确认项。" + (result.Warnings.Count > 0 ? " " + string.Join("；", result.Warnings) : ""));
+            SetStatus($"解析完成：{result.Segments.Count} 条内容。请检查待确认项。" + (clearedLinks > 0 ? $" 已清除 {clearedLinks} 个指向旧主线的连接，请在素材袋中重新连接。" : "") + (result.Warnings.Count > 0 ? " " + string.Join("；", result.Warnings) : ""));
         }
         finally { _busy = false; IsEnabled = true; }
     }
@@ -434,7 +442,7 @@ public partial class MainWindow : Window
         var p = _project.Segments.Count(s => s.Include && !s.Reviewed && (s.Warnings.Count > 0 || (s.Kind == SegmentKind.Dialogue && s.Speaker.Length == 0)));
         var branchPending = branchSegments.Count(s => s.Include && !s.Reviewed && (s.Warnings.Count > 0 || (s.Kind == SegmentKind.Dialogue && s.Speaker.Length == 0)));
         var chars = _project.Segments.Concat(branchSegments).Where(s => s.Kind == SegmentKind.Dialogue && s.Speaker.Length > 0).Select(s => s.Speaker).Distinct().Count();
-        C<TextBlock>("StatsText").Text = $"{_project.Segments.Count} 条内容  ·  {chars} 位角色  ·  {p} 条待确认  ·  {_project.ChoiceTrees.Count} 棵选项树" +
+        C<TextBlock>("StatsText").Text = $"{_project.Segments.Count} 条内容  ·  {chars} 位角色  ·  {p} 条待确认  ·  {_project.ChoiceTrees.Count} 棵选项树  ·  {_project.Fragments.Count} 个收纳片段" +
             (branchPending > 0 ? $"  ·  分支另有 {branchPending} 条待确认" : "") +
             (display.Count != _project.Segments.Count ? $"  /  显示 {display.Count} 条" : "");
         C<Button>("UndoButton").IsEnabled = _undo.Count > 0;
@@ -481,13 +489,18 @@ public partial class MainWindow : Window
             if (start >= 0) { Source.SelectionStart = start; Source.SelectionEnd = start + _selected.Source.Length; Source.CaretIndex = start; }
         }
         _loading = false;
+        if (_motionSelectionId != _selected?.Id)
+        {
+            _motionSelectionId = _selected?.Id;
+            if (_selected != null) UiMotion.Reveal(C<StackPanel>("EditorPanel"));
+        }
     }
 
     private readonly record struct SegmentEditSnapshot(string Text, string Speaker, SegmentKind Kind, bool Include);
 
     private void UpdatePreview()
     {
-        try { C<TextBox>("RpyBox").Text = _project.Segments.Count == 0 ? "解析后会在这里显示 .rpy 内容。" : RenpyExporter.Generate(_project.Segments, _project.Export, _project.ChoiceTrees); }
+        try { C<TextBox>("RpyBox").Text = _project.Segments.Count == 0 ? "解析后会在这里显示 .rpy 内容。" : RenpyExporter.Generate(_project.Segments, _project.Export, _project.ChoiceTrees, _project.Fragments); }
         catch (Exception ex) { C<TextBox>("RpyBox").Text = "导出设置需要调整：" + ex.Message; }
     }
 
@@ -515,6 +528,8 @@ public partial class MainWindow : Window
         CommitEditor(); var i = _project.Segments.IndexOf(_selected);
         if (i < 0 || i == _project.Segments.Count - 1) throw new UserFacingException("当前已经是最后一条，后面没有可合并的内容。");
         var next = _project.Segments[i + 1];
+        if (StoryFragmentEditor.IsReferenced(_project, next.Id))
+            throw new UserFacingException("下一句是跳转目标。请先调整选项或片段的后续连接，再合并，避免改变跳转起点。");
         if (_project.ChoiceTrees.Any(t => t.AnchorSegmentId == _selected.Id && t.Placement == ChoicePlacement.After ||
             t.AnchorSegmentId == next.Id && t.Placement == ChoicePlacement.Before))
             throw new UserFacingException("这两句之间已有选项树。请先在「选项树」里移动或删除该选项，再合并句子。");
@@ -597,6 +612,16 @@ public partial class MainWindow : Window
         SetStatus($"选项树已更新，共 {_project.ChoiceTrees.Count} 棵。请保存工程以保留分支。");
     }
 
+    private async Task OpenFragmentBagAsync()
+    {
+        CommitEditor();
+        var window = new FragmentBagWindow(_project, Rows.SelectedItems?.OfType<Segment>().Select(segment => segment.Id));
+        if (!await window.ShowDialog<bool>(this) || !window.HasChanges) return;
+        PushUndo(); _project = window.EditedProject!; _selected = null; _editorTargets = [];
+        _dirty = true; _manualEdits = true;
+        Refresh(); SetStatus($"素材袋已更新：{_project.Fragments.Count} 个片段。可在选项树中连接跳转；可撤销本次修改。");
+    }
+
     private Task UndoAsync()
     {
         if (_undo.Count == 0) return Task.CompletedTask;
@@ -631,13 +656,16 @@ public partial class MainWindow : Window
             throw new UserFacingException("没有可导出的内容，请先解析稿件并检查勾选状态。");
         var blank = _project.Segments.FindIndex(s => s.Include && string.IsNullOrWhiteSpace(s.Text));
         if (blank >= 0) throw new UserFacingException($"第 {blank + 1} 条正文为空，请填写内容或取消包含在导出中。");
-        var branchSegments = ChoiceSegments(_project.ChoiceTrees).ToList();
+        StoryGraphValidator.Validate(_project.Segments, _project.ChoiceTrees, _project.Fragments);
+        var branchSegments = ChoiceSegments(_project.ChoiceTrees)
+            .Concat(StoryGraphValidator.ReachableFragments(_project.ChoiceTrees, _project.Fragments)
+                .SelectMany(fragment => fragment.Segments.Concat(ChoiceSegments(fragment.ChoiceTrees)))).ToList();
         if (branchSegments.Any(s => s.Include && string.IsNullOrWhiteSpace(s.Text)))
-            throw new UserFacingException("选项树中有空白句子，请在选项树里填写内容或删除该句子。");
+            throw new UserFacingException("选项分支或已连接的素材片段中有空白句子，请填写内容或取消导出该句子。");
         var pending = _project.Segments.Concat(branchSegments).Count(s => s.Include && !s.Reviewed &&
             (s.Warnings.Count > 0 || (s.Kind == SegmentKind.Dialogue && string.IsNullOrWhiteSpace(s.Speaker))));
         if (pending > 0 && !await Dialog("还有待确认内容", $"有 {pending} 条内容需要检查。未指定说话人的对白会使用旁白代号 s 导出。你可以返回校正，或导出当前草稿。", "导出草稿", "返回校正")) return;
-        _ = RenpyExporter.Generate(_project.Segments, _project.Export, _project.ChoiceTrees);
+        _ = RenpyExporter.Generate(_project.Segments, _project.Export, _project.ChoiceTrees, _project.Fragments);
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "导出至 Ren’Py 项目的 game 文件夹", SuggestedFileName = _project.Export.Label + ".rpy", DefaultExtension = "rpy", FileTypeChoices = [new("Ren’Py 剧本") { Patterns = ["*.rpy"] }], ShowOverwritePrompt = true });
         var path = file?.TryGetLocalPath(); if (path == null) return;
         if (!path.EndsWith(".rpy", StringComparison.OrdinalIgnoreCase)) path += ".rpy";
@@ -659,7 +687,7 @@ public partial class MainWindow : Window
                 UpdatePreview();
             }
         }
-        RenpyExporter.Write(path, _project.Segments, _project.Export, overwrite, _project.ChoiceTrees);
+        RenpyExporter.Write(path, _project.Segments, _project.Export, overwrite, _project.ChoiceTrees, _project.Fragments);
         SetStatus("导出成功：" + path);
         var entryHint = createsStart
             ? "脚本已包含 label start，可作为没有其他 start 的新项目入口；不要再与另一个 start 放进同一工程。"
@@ -716,7 +744,19 @@ public partial class MainWindow : Window
         _projectPath = null; _dirty = true; _manualEdits = false; _undo.Clear(); _selected = null; SetProjectControls(); await ParseAsync();
     }
 
-    private Task HelpAsync() => Dialog("句幕使用说明", "1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。\n2. 选择「小说正文」或「剧本」，设置拆分方式，点击解析。新稿件默认全部按「旁白/人物动作或其他」导入，保留原文中的姓名、引号和标点；需要原有规则识别时勾选「自动识别对白与角色」。\n3. 点击条目校正角色与内容；单击可多选，点击「审核所选」可批量确认。新输入的人物姓名会进入快捷列表。只选中一句时，右侧可上移、下移或删除；焦点在句子列表时也可用 Alt+↑ / Alt+↓ / Delete。关联选项树随移动句子一起移动；删除前会确认。\n4. 在识别结果上方输入文字并点击「添加选项」：选中一句时接在该句后，未选中时接在正文末尾。同一位置连续添加会成为同组选项。\n5. 点击「选项树」打开图形界面。将选项拖到图内绿色区域可排到同组末尾；拖到左侧底部可接在最后一棵选项树后，成为顺序播放的新选项树。可用 × 删除，最后点击「应用选项树」。\n6. 保存 .jumu 工程，保留原文、校正与选项树。\n7. 导出 .rpy 到 Ren’Py 项目的 game 文件夹。已有 label start 的工程，在其中 call 对应剧情 label；没有 start 的新工程可在设置中勾选生成启动入口，导出时也会检查并提示。\n\n勾选自动识别后，小说模式结合引号与明确说话动作推断；剧本模式优先识别角色标记。两者均为离线上下文规则，不能保证理解所有小说语境。代词、引用和歧义会提示复核。\n\n选项分支结束后会回到主线；导出时自动定义说话人角色变量，旁白使用 s，但不会自动创建剧情状态变量或永久跳转。旧版 .doc 请先另存为 .docx。\n\n所有处理在本机完成，无需账号或网络。", "知道了");
+    private Task HelpAsync() => Dialog("句幕使用说明", """
+        1. 导入 TXT、DOCX、Markdown，或将正文粘贴到左侧。选择小说/剧本模式后解析；默认保留为旁白，需要时开启自动识别对白与角色。
+        2. 点击句子校正正文、角色与类型。点击/拖动多选后可批量确认。单句支持上移、下移、删除、拆分和合并；关联选项树随句子移动。
+        3. 打开「素材袋」：勾选连续句子，拖动 ⠿ 到袋子里，成为独立的片段节点。将卡片拖回主线可插入到任意句子前后。也可使用收纳/取出按钮。
+        4. 点击素材卡片可修改名称、文字和说话人、调整句子顺序、编辑片段内选项树。片段结束默认连接到原来的后续句子，也可选择其他节点。
+        5. 打开「选项树」：添加分支及嵌套菜单。把左侧素材卡片拖到黄色选项节点可建立跳转；在右侧「分支结束后」也可选择正文中的任意一句。跳转后从目标位置继续剧情；未设置跳转的分支会回到当前主线。
+        6. 素材袋中未连接的片段只保存为素材，不会自动导出或播放。移动节点保留连接；取回片段后，连接会转向它的第一句。被引用的目标需先调整连接再删除。
+        7. 保存 .jumu 工程保留所有节点和连接。新版可打开旧工程；素材袋工程需要 0.4.0 或更高版本。
+        8. 导出 .rpy 到 Ren’Py 的 game 文件夹。已有 start 的工程在其中 call 剧情 label；没有 start 的工程可生成启动入口。目标节点的 label 与 jump 自动生成。
+
+        角色代号自动定义，无说话人的句子使用 s。中文显示仍需要在 Ren’Py 项目中配置中文字体。旧版 .doc 请先另存为 .docx。
+        自动识别使用离线规则；歧义仍需人工复核。所有稿件处理在本机完成。
+        """, "知道了");
 
     private Task<bool> Dialog(string title, string text, string accept, string? cancel = null) => CustomDialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 24 }, accept, cancel);
     private async Task<bool> CustomDialog(string title, Control body, string accept, string? cancel, double width = 540)
@@ -729,6 +769,7 @@ public partial class MainWindow : Window
         if (cancel != null) { var c = new Button { Content = cancel }; c.Click += (_, _) => dialog.Close(false); buttons.Children.Add(c); }
         var ok = new Button { Content = accept }; ok.Classes.Add("primary"); ok.Click += (_, _) => dialog.Close(true); buttons.Children.Add(ok);
         layout.Children.Add(buttons); dialog.Content = layout;
+        UiMotion.Attach(dialog);
         return await dialog.ShowDialog<bool>(this);
     }
 }

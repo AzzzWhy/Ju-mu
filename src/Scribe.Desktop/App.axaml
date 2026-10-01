@@ -3,6 +3,13 @@
     <FluentTheme />
     <Style Selector="Window"><Setter Property="FontFamily" Value="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Segoe UI"/><Setter Property="Foreground" Value="#203C38"/><Setter Property="Background" Value="#F3F5F1"/></Style>
     <Style Selector="Button"><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="14,9"/><Setter Property="Cursor" Value="Hand"/></Style>
+    <Style Selector="Button">
+      <Setter Property="RenderTransform" Value="translateY(0px) scale(1)"/>
+      <Setter Property="Transitions"><Transitions><TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" Easing="CubicEaseOut"/><DoubleTransition Property="Opacity" Duration="0:0:0.12"/></Transitions></Setter>
+    </Style>
+    <Style Selector="Button:pointerover"><Setter Property="RenderTransform" Value="translateY(-1px) scale(1)"/></Style>
+    <Style Selector="Button:pressed"><Setter Property="RenderTransform" Value="translateY(0px) scale(0.985)"/></Style>
+    <Style Selector="Button /template/ ContentPresenter"><Setter Property="Transitions"><Transitions><BrushTransition Property="Background" Duration="0:0:0.14"/><BrushTransition Property="BorderBrush" Duration="0:0:0.14"/></Transitions></Setter></Style>
     <Style Selector="Button.primary"><Setter Property="Background" Value="#236752"/><Setter Property="Foreground" Value="White"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="#184D3E"/><Setter Property="Foreground" Value="White"/></Style>
     <Style Selector="Button.soft"><Setter Property="Background" Value="#E6EEE7"/><Setter Property="Foreground" Value="#236752"/></Style>
@@ -13,6 +20,18 @@
     <Style Selector="Border.panel"><Setter Property="Background" Value="White"/><Setter Property="CornerRadius" Value="12"/><Setter Property="BorderBrush" Value="#DEE6DD"/><Setter Property="BorderThickness" Value="1"/></Style>
     <Style Selector="ListBoxItem"><Setter Property="Padding" Value="4"/><Setter Property="Margin" Value="0,0,0,5"/><Setter Property="CornerRadius" Value="8"/></Style>
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter"><Setter Property="Background" Value="#E2EFE7"/></Style>
+    <Style Selector="ListBoxItem /template/ ContentPresenter"><Setter Property="Transitions"><Transitions><BrushTransition Property="Background" Duration="0:0:0.14"/></Transitions></Setter></Style>
+    <Style Selector="Border.motion-card">
+      <Setter Property="BoxShadow" Value="0 0 0 0 #00236752"/>
+      <Setter Property="Transitions"><Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.12"/><BrushTransition Property="BorderBrush" Duration="0:0:0.14"/><BoxShadowsTransition Property="BoxShadow" Duration="0:0:0.14"/></Transitions></Setter>
+    </Style>
+    <Style Selector="Border.motion-card:pointerover"><Setter Property="BoxShadow" Value="0 2 8 0 #20236752"/></Style>
+    <Style Selector="Border.motion-drop"><Setter Property="Transitions"><Transitions><BrushTransition Property="BorderBrush" Duration="0:0:0.14"/></Transitions></Setter></Style>
+    <Style Selector="Window.motion-off Button"><Setter Property="Transitions" Value="{x:Null}"/><Setter Property="RenderTransform" Value="{x:Null}"/></Style>
+    <Style Selector="Window.motion-off Button /template/ ContentPresenter"><Setter Property="Transitions" Value="{x:Null}"/></Style>
+    <Style Selector="Window.motion-off ListBoxItem /template/ ContentPresenter"><Setter Property="Transitions" Value="{x:Null}"/></Style>
+    <Style Selector="Window.motion-off Border.motion-card"><Setter Property="Transitions" Value="{x:Null}"/><Setter Property="BoxShadow" Value="0 0 0 0 #00236752"/></Style>
+    <Style Selector="Window.motion-off Border.motion-drop"><Setter Property="Transitions" Value="{x:Null}"/></Style>
     <Style Selector="ToolTip"><Setter Property="MaxWidth" Value="350"/></Style>
   </Application.Styles>
 </Application>

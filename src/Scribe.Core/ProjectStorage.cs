@@ -17,6 +17,7 @@ public static class ProjectStorage
     public static void Save(string path, ProjectDocument project)
     {
         Validate(project);
+        project.Version = 2;
         string json = JsonSerializer.Serialize(project, JsonOptions);
         if (Encoding.UTF8.GetByteCount(json) > MaxProjectBytes) throw new UserFacingException("工程文件过大，请分章节保存。");
         SafeFileWriter.Write(path, json, true, "工程");
@@ -56,14 +57,14 @@ public static class ProjectStorage
     private static void Validate(ProjectDocument? project)
     {
         if (project is null) throw new UserFacingException("没有可保存的工程。");
-        if (project.Version != 1) throw new UserFacingException($"不支持工程版本 {project.Version}。请使用创建此工程的版本打开，或升级程序。");
-        if (project.Options is null || project.Export is null || project.Segments is null || project.Options.Aliases is null || project.Export.CharacterVariables is null || project.SpeakerShortcuts is null || project.ChoiceTrees is null)
+        if (project.Version is not (1 or 2)) throw new UserFacingException($"不支持工程版本 {project.Version}。请使用创建此工程的版本打开，或升级程序。");
+        if (project.Options is null || project.Export is null || project.Segments is null || project.Options.Aliases is null || project.Export.CharacterVariables is null || project.SpeakerShortcuts is null || project.ChoiceTrees is null || project.Fragments is null)
             throw new UserFacingException("工程缺少必要的设置或段落数据，请重新导入原文。");
         if (project.SourceText is null || project.SourceFile is null || project.SourceText.Length > DocumentImporter.MaxTextCharacters || project.SourceFile.Length > 32768)
             throw new UserFacingException("工程原文为空、格式错误或超过 1000 万字符。");
         if (!Enum.IsDefined(project.Options.Mode) || !Enum.IsDefined(project.Options.Split) || project.Options.MaxLength is < 10 or > 10_000)
             throw new UserFacingException("工程的解析模式或拆分长度无效，请重新导入原文。");
-        if (project.Segments.Count > 200_000 || project.Options.Aliases.Count > 10_000 || project.Export.CharacterVariables.Count > 10_000 || project.SpeakerShortcuts.Count > 10_000)
+        if (project.Segments.Count + project.Fragments.Sum(fragment => fragment?.Segments?.Count ?? 0) > 200_000 || project.Options.Aliases.Count > 10_000 || project.Export.CharacterVariables.Count > 10_000 || project.SpeakerShortcuts.Count > 10_000)
             throw new UserFacingException("工程包含过多段落或角色，请分章节保存。");
         // Draft export settings may be incomplete; identifiers are validated at export time.
         if (project.Export.Label is null || project.Export.Label.Length > 1024) throw new UserFacingException("工程的剧情标签无效。");
@@ -75,7 +76,9 @@ public static class ProjectStorage
             if (string.IsNullOrWhiteSpace(speaker) || speaker.Length > 1024 || !shortcuts.Add(speaker.Trim()))
                 throw new UserFacingException("工程中有空白、过长或重复的人物姓名快捷选项，请检查后重试。");
         long characters = project.SourceText.Length;
-        foreach (var segment in project.Segments)
+        if (project.Fragments.Any(fragment => fragment is null || fragment.Segments is null))
+            throw new UserFacingException("工程中有损坏的素材袋片段，请使用备份恢复。");
+        foreach (var segment in project.Segments.Concat(project.Fragments.SelectMany(fragment => fragment.Segments)))
         {
             if (segment is null || segment.Text is null || segment.Source is null || segment.Speaker is null || segment.Id is null || segment.Warnings is null || !Enum.IsDefined(segment.Kind))
                 throw new UserFacingException("工程中有损坏的段落，请使用备份恢复或重新导入原文。");
@@ -84,7 +87,7 @@ public static class ProjectStorage
             characters += segment.Text.Length + segment.Source.Length;
             if (characters > 30_000_000) throw new UserFacingException("工程文字总量过大，请分章节保存。");
         }
-        ChoiceTreeValidator.Validate(project.ChoiceTrees, project.Segments);
+        StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
     }
 }
 

@@ -23,6 +23,8 @@ public static class SegmentListEditor
         ArgumentNullException.ThrowIfNull(project);
         ChoiceTreeValidator.Validate(project.ChoiceTrees, project.Segments);
         var index = Find(project, segmentId);
+        if (StoryFragmentEditor.IsReferenced(project, segmentId))
+            throw new UserFacingException("这句是选项或片段的跳转目标。请先调整连接，再删除句子。");
         var removedTrees = project.ChoiceTrees.RemoveAll(tree => tree.AnchorSegmentId == segmentId);
         project.Segments.RemoveAt(index);
         return removedTrees;

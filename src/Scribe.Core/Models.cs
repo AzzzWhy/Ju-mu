@@ -81,6 +81,8 @@ public sealed class ChoiceBranch
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Label { get; set; } = "";
     public List<ChoiceItem> Items { get; set; } = [];
+    // Empty means this branch rejoins the following story text.
+    public string TargetNodeId { get; set; } = "";
 }
 
 public sealed class ChoiceItem
@@ -89,9 +91,21 @@ public sealed class ChoiceItem
     public ChoiceTree? Tree { get; set; }
 }
 
+// A reusable route of ordered text nodes. It is not played automatically: a
+// choice must jump to the fragment or to one of its sentences.
+public sealed class StoryFragment
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Title { get; set; } = "";
+    public List<Segment> Segments { get; set; } = [];
+    public List<ChoiceTree> ChoiceTrees { get; set; } = [];
+    // Optional continuation after the last sentence of this fragment.
+    public string NextNodeId { get; set; } = "";
+}
+
 public sealed class ProjectDocument
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public bool RequiresReparse { get; set; }
     public string SourceFile { get; set; } = "";
     public string SourceText { get; set; } = "";
@@ -100,6 +114,7 @@ public sealed class ProjectDocument
     public List<Segment> Segments { get; set; } = [];
     public List<string> SpeakerShortcuts { get; set; } = [];
     public List<ChoiceTree> ChoiceTrees { get; set; } = [];
+    public List<StoryFragment> Fragments { get; set; } = [];
 }
 
 public sealed class UserFacingException(string message) : Exception(message);

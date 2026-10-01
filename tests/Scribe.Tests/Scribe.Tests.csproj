@@ -6,4 +6,5 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../../src/Scribe.Core/Scribe.Core.csproj" /></ItemGroup>
+  <ItemGroup><None Update="RenpyGraph/*.rpy" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

@@ -23,6 +23,10 @@ public sealed class ChoiceTreeWindow : Window
 
     private readonly List<ChoiceTree> _trees;
     private readonly List<Segment> _segments;
+    private readonly ProjectDocument _context;
+    private readonly string? _routeFragmentId;
+    private readonly List<StoryTarget> _targets;
+    private readonly List<(Border Card, ChoiceBranch Branch)> _branchCards = [];
     private readonly string _initialJson;
     private readonly string? _initialSegmentId;
     private readonly StackPanel _treeList = new() { Spacing = 8 };
@@ -43,11 +47,16 @@ public sealed class ChoiceTreeWindow : Window
     public List<ChoiceTree>? EditedTrees { get; private set; }
     public bool HasChanges { get; private set; }
 
-    public ChoiceTreeWindow(ProjectDocument project, string? selectedSegmentId = null, ChoicePlacement? createAt = null)
+    public ChoiceTreeWindow(ProjectDocument project, string? selectedSegmentId = null, ChoicePlacement? createAt = null,
+        string? routeFragmentId = null)
     {
-        _initialJson = JsonSerializer.Serialize(project.ChoiceTrees);
+        _context = project;
+        _routeFragmentId = routeFragmentId;
+        var route = project.Fragments.FirstOrDefault(fragment => fragment.Id == routeFragmentId);
+        _targets = StoryTargets.For(project);
+        _initialJson = JsonSerializer.Serialize(route?.ChoiceTrees ?? project.ChoiceTrees);
         _trees = JsonSerializer.Deserialize<List<ChoiceTree>>(_initialJson) ?? [];
-        _segments = project.Segments.ToList();
+        _segments = (route?.Segments ?? project.Segments).ToList();
         _initialSegmentId = selectedSegmentId;
         _currentTree = _trees.LastOrDefault(t => t.AnchorSegmentId == selectedSegmentId) ?? TreesInStoryOrder().LastOrDefault();
         _selectedModel = _currentTree;
@@ -61,7 +70,7 @@ public sealed class ChoiceTreeWindow : Window
             _selectedModel = created;
         }
 
-        Title = "选项树 · 句幕";
+        Title = route is null ? "选项树 · 句幕" : $"{route.Title} · 选项树 · 句幕";
         Width = 1380;
         Height = 860;
         MinWidth = 1080;
@@ -70,6 +79,7 @@ public sealed class ChoiceTreeWindow : Window
         Background = Brush.Parse("#F8FAF6");
         BuildWindow();
         RenderAll();
+        UiMotion.Attach(this);
     }
 
     private void BuildWindow()
@@ -86,7 +96,7 @@ public sealed class ChoiceTreeWindow : Window
         header.Children.Add(new TextBlock { Text = "选项树", FontSize = 24, FontWeight = FontWeight.Bold });
         header.Children.Add(new TextBlock
         {
-            Text = "点击图中的节点，在右侧编辑；从原文的任意一句前或后插入选项，分支还可以继续嵌套选项。",
+            Text = "点击节点编辑。将左侧素材片段拖到选项上可建立跳转，也可在右侧选择任意正文句子作为目标。",
             Foreground = Brush.Parse("#64786D"), TextWrapping = TextWrapping.Wrap
         });
         Grid.SetColumnSpan(header, 3);
@@ -109,6 +119,7 @@ public sealed class ChoiceTreeWindow : Window
         _endDropZone.Background = Brush.Parse("#EDF5ED");
         _endDropZone.BorderBrush = Brush.Parse("#8EBDA3");
         _endDropZone.BorderThickness = new Thickness(1);
+        _endDropZone.Classes.Add("motion-drop");
         _endDropZone.CornerRadius = new CornerRadius(8);
         _endDropZone.Padding = new Thickness(9);
         _endDropZone.Margin = new Thickness(0, 8, 0, 0);
@@ -175,7 +186,13 @@ public sealed class ChoiceTreeWindow : Window
         apply.Click += (_, _) =>
         {
             CommitDetails();
-            try { ChoiceTreeValidator.Validate(_trees, _segments, requireComplete: false); }
+            try
+            {
+                var copy = JsonSerializer.Deserialize<ProjectDocument>(JsonSerializer.Serialize(_context))!;
+                if (_routeFragmentId is null) copy.ChoiceTrees = _trees;
+                else copy.Fragments.Single(fragment => fragment.Id == _routeFragmentId).ChoiceTrees = _trees;
+                StoryGraphValidator.Validate(copy.Segments, copy.ChoiceTrees, copy.Fragments);
+            }
             catch (UserFacingException ex)
             {
                 _summary.Text = "无法应用：" + ex.Message;
@@ -254,6 +271,7 @@ public sealed class ChoiceTreeWindow : Window
         if (_trees.Count == 0)
         {
             _treeList.Children.Add(new TextBlock { Text = "还没有选项树。点击上方按钮创建。", TextWrapping = TextWrapping.Wrap, Foreground = Brush.Parse("#64786D"), Margin = new Thickness(2, 8) });
+            RenderFragmentPalette();
             return;
         }
         foreach (var (tree, index) in TreesInStoryOrder().Select((tree, index) => (tree, index)))
@@ -272,6 +290,7 @@ public sealed class ChoiceTreeWindow : Window
             body.Children.Add(new TextBlock { Text = $"{index + 1:00}  {(string.IsNullOrWhiteSpace(tree.Title) ? "无标题选项" : tree.Title)}", FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             body.Children.Add(new TextBlock { Text = $"{(tree.Placement == ChoicePlacement.Before ? "句前" : "句后")} · {AnchorLabel(tree)}", FontSize = 11, Foreground = Brush.Parse("#64786D"), TextTrimming = TextTrimming.CharacterEllipsis });
             card.Child = body;
+            card.Classes.Add("motion-card");
             var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
             row.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
@@ -294,6 +313,57 @@ public sealed class ChoiceTreeWindow : Window
             AttachTreeDrag(card, tree);
             _treeList.Children.Add(row);
         }
+        RenderFragmentPalette();
+    }
+
+    private void RenderFragmentPalette()
+    {
+        if (_context.Fragments.Count == 0) return;
+        _treeList.Children.Add(Caption("素材袋 · 拖到选项建立跳转"));
+        foreach (var fragment in _context.Fragments)
+        {
+            var card = new Border
+            {
+                Background = Brush.Parse("#EAF0FB"), BorderBrush = Brush.Parse("#91A9D0"),
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10),
+                Cursor = new Cursor(StandardCursorType.Hand),
+                Child = new TextBlock { Text = $"▣ {fragment.Title}\n{fragment.Segments.Count} 句", TextWrapping = TextWrapping.Wrap }
+            };
+            Point? start = null;
+            card.Classes.Add("motion-card");
+            var dragged = false;
+            card.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(card).Properties.IsLeftButtonPressed) return;
+                start = e.GetPosition(this); dragged = false; e.Pointer.Capture(card); e.Handled = true;
+            };
+            card.PointerMoved += (_, e) =>
+            {
+                if (start is not { } origin) return;
+                var delta = e.GetPosition(this) - origin;
+                if (!dragged && Math.Abs(delta.X) + Math.Abs(delta.Y) < 8) return;
+                dragged = true; card.Opacity = 0.7; card.RenderTransform = new TranslateTransform(delta.X, delta.Y);
+                _summary.Text = "将片段放到图中的黄色选项节点上。";
+            };
+            card.PointerReleased += (_, e) =>
+            {
+                if (start is null) return;
+                var target = dragged ? _branchCards.FirstOrDefault(pair => Inside(pair.Card, e)).Branch : null;
+                start = null; card.Opacity = 1; card.RenderTransform = null; e.Pointer.Capture(null);
+                if (target is not null)
+                {
+                    CommitDetails(); target.TargetNodeId = fragment.Id; _selectedModel = target;
+                }
+                RenderAll(); e.Handled = true;
+            };
+            _treeList.Children.Add(card);
+        }
+    }
+
+    private static bool Inside(Control control, PointerEventArgs e)
+    {
+        var point = e.GetPosition(control);
+        return point.X >= 0 && point.Y >= 0 && point.X <= control.Bounds.Width && point.Y <= control.Bounds.Height;
     }
 
     private bool OverEndZone(PointerEventArgs e)
@@ -406,6 +476,7 @@ public sealed class ChoiceTreeWindow : Window
     }
 
     private sealed record LayoutResult(GraphNode Entry, List<GraphNode> Exits, int MaxColumn);
+    private sealed record JumpLink(ChoiceBranch Branch, string TargetName);
 
     private GraphNode AddNode(object model, string heading, string body, int column, double y)
     {
@@ -450,7 +521,14 @@ public sealed class ChoiceTreeWindow : Window
                     nextColumn = nested.MaxColumn + 1;
                 }
             }
-            exits.AddRange(previous);
+            if (branch.TargetNodeId.Length > 0)
+            {
+                var targetName = _targets.FirstOrDefault(target => target.Id == branch.TargetNodeId)?.Name ?? "目标已失效";
+                var targetNode = AddNode(new JumpLink(branch, targetName), "↗ 跳转到文本", targetName, nextColumn, branchY);
+                foreach (var prior in previous) _edges.Add((prior, targetNode));
+                nextColumn++;
+            }
+            else exits.AddRange(previous);
             maxColumn = Math.Max(maxColumn, nextColumn - 1);
         }
         if (branchYs.Count == 0)
@@ -469,6 +547,7 @@ public sealed class ChoiceTreeWindow : Window
         _branchEndDropZone = null;
         _nodes.Clear();
         _edges.Clear();
+        _branchCards.Clear();
         _nextY = 50;
         _maxColumn = 0;
         if (_currentTree == null)
@@ -500,6 +579,8 @@ public sealed class ChoiceTreeWindow : Window
         Canvas.SetLeft(_branchEndDropZone, 28 + ColumnPitch);
         Canvas.SetTop(_branchEndDropZone, _nextY + 4);
         _canvas.Children.Add(_branchEndDropZone);
+        _branchEndDropZone.Classes.Add("motion-drop");
+        UiMotion.Reveal(_canvas);
     }
 
     private static double NodeX(GraphNode node) => 28 + node.Column * ColumnPitch;
@@ -533,7 +614,7 @@ public sealed class ChoiceTreeWindow : Window
         var card = new Border
         {
             Width = NodeWidth, Height = NodeHeight,
-            Background = Brush.Parse(isMenu ? "#E6F2E9" : isBranch ? "#FFF4DF" : "#FFFFFF"),
+            Background = Brush.Parse(isMenu ? "#E6F2E9" : isBranch ? "#FFF4DF" : node.Model is JumpLink ? "#EAF0FB" : "#FFFFFF"),
             BorderBrush = Brush.Parse(isSelected ? "#167456" : isMenu ? "#8EBDA3" : isBranch ? "#D4B980" : "#C8D8CD"),
             BorderThickness = new Thickness(isSelected ? 3 : 1),
             CornerRadius = new CornerRadius(11),
@@ -544,10 +625,14 @@ public sealed class ChoiceTreeWindow : Window
         body.Children.Add(new TextBlock { Text = node.Heading, FontSize = 11, FontWeight = FontWeight.Bold, Foreground = Brush.Parse("#476356"), TextTrimming = TextTrimming.CharacterEllipsis });
         body.Children.Add(new TextBlock { Text = node.Body.Replace('\n', ' '), FontSize = 13, MaxLines = 2, TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis });
         card.Child = body;
+        card.Classes.Add("motion-card");
         if (node.Model is ChoiceBranch branch)
+        {
+            _branchCards.Add((card, branch));
             AttachBranchDrag(card, branch);
+        }
         else
-            card.PointerPressed += (_, e) => { SelectNode(node.Model); e.Handled = true; };
+            card.PointerPressed += (_, e) => { SelectNode(node.Model is JumpLink jump ? jump.Branch : node.Model); e.Handled = true; };
         Canvas.SetLeft(card, NodeX(node));
         Canvas.SetTop(card, NodeY(node));
         _canvas.Children.Add(card);
@@ -638,6 +723,7 @@ public sealed class ChoiceTreeWindow : Window
 
     private void RenderDetails()
     {
+        UiMotion.Reveal(_details);
         _details.Children.Clear();
         _commitDetails = null;
         if (_selectedModel is ChoiceTree tree) RenderTreeDetails(tree);
@@ -711,7 +797,24 @@ public sealed class ChoiceTreeWindow : Window
         _details.Children.Add(Caption("选项文字"));
         var label = new TextBox { Text = branch.Label, Watermark = "例如：打开那扇门" };
         _details.Children.Add(label);
-        _commitDetails = () => branch.Label = (label.Text ?? "").Trim();
+        _details.Children.Add(Caption("分支结束后"));
+        var targets = new List<StoryTarget> { new("", "继续当前主线（不跳转）") };
+        targets.AddRange(_targets);
+        var target = new ComboBox
+        {
+            ItemsSource = targets, HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedItem = targets.FirstOrDefault(item => item.Id == branch.TargetNodeId) ?? targets[0]
+        };
+        _details.Children.Add(target);
+        _details.Children.Add(Note("选择目标后，播放本分支内容，再跳到目标位置继续剧情。可跳到正文句子或素材袋片段。"));
+        _commitDetails = () =>
+        {
+            branch.Label = (label.Text ?? "").Trim();
+            branch.TargetNodeId = (target.SelectedItem as StoryTarget)?.Id ?? "";
+        };
+        var update = Button("更新跳转连接", primary: true);
+        update.Click += (_, _) => { CommitDetails(); RenderAll(); };
+        _details.Children.Add(update);
         AddAction("＋ 添加旁白 / 动作", () => AddSegment(branch, SegmentKind.Narration));
         AddAction("＋ 添加对白", () => AddSegment(branch, SegmentKind.Dialogue));
         AddAction("＋ 添加场景说明", () => AddSegment(branch, SegmentKind.Direction));

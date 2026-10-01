@@ -10,7 +10,6 @@ public static class ChoiceTreeValidator
     public static void Validate(IReadOnlyList<ChoiceTree> roots, IReadOnlyList<Segment> segments, bool requireComplete = false)
     {
         if (roots is null || segments is null) throw new UserFacingException("选项树或正文段落数据不存在，请重新打开工程。");
-        if (roots.Count == 0) return;
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var anchors = new HashSet<string>(StringComparer.Ordinal);

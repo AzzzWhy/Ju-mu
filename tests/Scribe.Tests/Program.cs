@@ -70,6 +70,130 @@ Test("逐句顺序：删除句子仅清理其关联选项树并保留原稿", ()
     UserError(() => SegmentListEditor.Delete(project, second.Id));
 });
 
+Test("素材袋：收纳连续文本时保留身份、角色、选项树与后续连接", () =>
+{
+    var opening = Narration("入口。");
+    var dialogue = new Segment { Text = "你好。", Speaker = "林夏", Kind = SegmentKind.Dialogue, Reviewed = true };
+    var scene = Narration("雨中走廊。");
+    var ending = Narration("共同结局。");
+    var project = new ProjectDocument { SourceText = "原始稿件", Segments = [opening, dialogue, scene, ending] };
+    var attached = ChoiceTreeEditor.AddQuickChoice(project, "继续", dialogue.Id).Tree;
+    var fragment = StoryFragmentEditor.Stash(project, [dialogue.Id, scene.Id], "雨夜片段");
+    Equal("原始稿件", project.SourceText);
+    Equal(2, project.Segments.Count);
+    True(ReferenceEquals(dialogue, fragment.Segments[0]), "收纳应保留原句及其已确认字段");
+    Equal("林夏", fragment.Segments[0].Speaker);
+    True(fragment.Segments[0].Reviewed, "校正状态应保留");
+    Equal(attached.Id, fragment.ChoiceTrees.Single().Id);
+    Equal(ending.Id, fragment.NextNodeId);
+    Equal(0, project.ChoiceTrees.Count);
+});
+Test("素材袋：非连续选择或收纳全部正文报错且不改变工程", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("甲"), Narration("乙"), Narration("丙")] };
+    var before = System.Text.Json.JsonSerializer.Serialize(project);
+    UserError(() => StoryFragmentEditor.Stash(project, [project.Segments[0].Id, project.Segments[2].Id]));
+    UserError(() => StoryFragmentEditor.Stash(project, project.Segments.Select(segment => segment.Id).ToList()));
+    UserError(() => StoryFragmentEditor.Stash(project, ["不存在"]));
+    Equal(before, System.Text.Json.JsonSerializer.Serialize(project));
+});
+Test("素材袋：取回正文后跳转目标仍指向原片段第一句，顺序及菜单恢复", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("入口"), Narration("片段甲"), Narration("片段乙"), Narration("结尾")] };
+    var firstId = project.Segments[1].Id;
+    ChoiceTreeEditor.AddQuickChoice(project, "片段内选择", firstId);
+    var fragment = StoryFragmentEditor.Stash(project, [firstId, project.Segments[2].Id]);
+    var entry = ChoiceTreeEditor.AddQuickChoice(project, "去片段", project.Segments[0].Id).Branch;
+    entry.TargetNodeId = fragment.Id;
+    StoryFragmentEditor.Restore(project, fragment.Id, 1);
+    Equal(firstId, entry.TargetNodeId);
+    Equal("入口,片段甲,片段乙,结尾", string.Join(',', project.Segments.Select(segment => segment.Text)));
+    Equal(0, project.Fragments.Count);
+    Equal(2, project.ChoiceTrees.Count);
+    StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments, true);
+});
+Test("剧情跳转：正文与素材袋目标生成独立 label，片段结束继续原后续", () =>
+{
+    var opening = Narration("主线入口");
+    var route = new Segment { Text = "雨夜对白", Speaker = "林夏", Kind = SegmentKind.Dialogue };
+    var ending = Narration("共同结局");
+    var project = new ProjectDocument { Segments = [opening, route, ending] };
+    var fragment = StoryFragmentEditor.Stash(project, [route.Id], "雨夜");
+    var choice = ChoiceTreeEditor.AddQuickChoice(project, "进入雨夜", opening.Id).Branch;
+    choice.TargetNodeId = fragment.Id;
+    var skip = ChoiceTreeEditor.AddQuickChoice(project, "直接结局", opening.Id).Branch;
+    skip.TargetNodeId = ending.Id;
+    var script = RenpyExporter.Generate(project.Segments, new ExportOptions { CreateStartLabel = true }, project.ChoiceTrees, project.Fragments);
+    Contains("define 林夏 = Character(\"林夏\")", script);
+    Equal(3, script.Split("jump jumu_node_", StringSplitOptions.None).Length - 1);
+    InOrder(script, "主线入口", "进入雨夜", "jump jumu_node_", "共同结局", "return", "雨夜对白", "jump jumu_node_");
+    var jumpLabels = script.Split('\n').Select(line => line.Trim()).Where(line => line.StartsWith("jump ")).Select(line => line[5..]).ToList();
+    foreach (var label in jumpLabels) Equal(1, script.Split("label " + label + ":", StringSplitOptions.None).Length - 1);
+});
+Test("剧情跳转：目标丢失拒绝保存与导出，目标句子不可直接删除", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("入口"), Narration("目标")] };
+    var branch = ChoiceTreeEditor.AddQuickChoice(project, "去目标", project.Segments[0].Id).Branch;
+    branch.TargetNodeId = project.Segments[1].Id;
+    UserError(() => SegmentListEditor.Delete(project, project.Segments[1].Id));
+    Equal(2, project.Segments.Count);
+    branch.TargetNodeId = "失效的标识";
+    UserError(() => ProjectStorage.Save(PathFor("missing-jump.jumu"), project));
+    UserError(() => RenpyExporter.Generate(project.Segments, project.Export, project.ChoiceTrees));
+});
+Test("素材袋：保存读取恢复片段、跳转及片段内选项，旧工程仍可打开", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("开场"), Narration("分支"), Narration("收尾")] };
+    ChoiceTreeEditor.AddQuickChoice(project, "分支选项", project.Segments[1].Id);
+    var fragment = StoryFragmentEditor.Stash(project, [project.Segments[1].Id]);
+    ChoiceTreeEditor.AddQuickChoice(project, "进入分支", project.Segments[0].Id).Branch.TargetNodeId = fragment.Id;
+    var path = PathFor("fragment-project.jumu"); ProjectStorage.Save(path, project);
+    var loaded = ProjectStorage.Load(path);
+    Equal(2, loaded.Version); Equal(fragment.Id, loaded.Fragments[0].Id);
+    Equal(fragment.Id, loaded.ChoiceTrees[0].Branches[0].TargetNodeId);
+    Equal(fragment.NextNodeId, loaded.Fragments[0].NextNodeId);
+    Equal(1, loaded.Fragments[0].ChoiceTrees.Count);
+    var old = PathFor("v1-project.jumu");
+    File.WriteAllText(old, "{\"Version\":1,\"SourceText\":\"\",\"Options\":{},\"Export\":{},\"Segments\":[]}");
+    Equal(0, ProjectStorage.Load(old).Fragments.Count);
+});
+Test("剧情跳转：重新解析后只清除失效连接，保留素材袋内的有效连接", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("开场"), Narration("分支"), Narration("后续")] };
+    var fragment = StoryFragmentEditor.Stash(project, [project.Segments[1].Id]);
+    var tree = new ChoiceTree { AnchorSegmentId = fragment.Segments[0].Id, Branches = [new ChoiceBranch { Label = "重复此段", TargetNodeId = fragment.Id }] };
+    fragment.ChoiceTrees.Add(tree);
+    project.Segments = [Narration("新主线")];
+    Equal(1, StoryFragmentEditor.ClearMissingTargets(project));
+    Equal("", fragment.NextNodeId); Equal(fragment.Id, tree.Branches[0].TargetNodeId);
+    StoryGraphValidator.Validate(project.Segments, project.ChoiceTrees, project.Fragments);
+});
+
+Test("素材袋：未连接的草稿不导出，跨片段的后续连接可正确导出", () =>
+{
+    var main = Narration("开场");
+    var a = new StoryFragment { Title = "路线甲", Segments = [Narration("甲路线")] };
+    var b = new StoryFragment { Title = "路线乙", Segments = [Narration("乙路线")] };
+    a.NextNodeId = b.Id;
+    var unused = new StoryFragment { Title = "未使用草稿", Segments = [Narration("不应导出的草稿")] };
+    unused.ChoiceTrees.Add(new ChoiceTree { AnchorSegmentId = unused.Segments[0].Id });
+    var tree = new ChoiceTree { AnchorSegmentId = main.Id, Branches = [new ChoiceBranch { Label = "出发", TargetNodeId = a.Id }] };
+    var script = RenpyExporter.Generate([main], new ExportOptions(), [tree], [a, b, unused]);
+    InOrder(script, "甲路线", "jump jumu_node_", "乙路线");
+    True(!script.Contains("不应导出的草稿", StringComparison.Ordinal), "未使用素材不应进入导出脚本");
+});
+Test("素材袋：删除被引用片段被阻止，解除连接后可以删除", () =>
+{
+    var project = new ProjectDocument { Segments = [Narration("入口"), Narration("路线"), Narration("结尾")] };
+    var fragment = StoryFragmentEditor.Stash(project, [project.Segments[1].Id]);
+    var branch = ChoiceTreeEditor.AddQuickChoice(project, "出发", project.Segments[0].Id).Branch;
+    branch.TargetNodeId = fragment.Segments[0].Id;
+    UserError(() => StoryFragmentEditor.Delete(project, fragment.Id));
+    Equal(1, project.Fragments.Count);
+    branch.TargetNodeId = ""; StoryFragmentEditor.Delete(project, fragment.Id);
+    Equal(0, project.Fragments.Count);
+});
+
 Test("剧本：中文全角冒号和英文半角冒号", () =>
 {
     var result = Parse("小明：你好。\nAlice: Hello.");
@@ -303,7 +427,8 @@ Test("导出：恶意引号换行保持在字符串内", () =>
 Test("导出：自动生成对话人代号，旁白使用 s，手动映射优先", () =>
 {
     var item = new Segment { Kind = SegmentKind.Dialogue, Speaker = "小明", Text = "你好。" };
-    var script = RenpyExporter.Generate([Narration("开场。"), item, item], new ExportOptions());
+    var script = RenpyExporter.Generate([Narration("开场。"), item,
+        new Segment { Kind = SegmentKind.Dialogue, Speaker = "小明", Text = "再说一句。" }], new ExportOptions());
     Contains("define s = Character(None)", script);
     Contains("define 小明 = Character(\"小明\")", script);
     Contains("s \"开场。\"", script);
@@ -775,6 +900,34 @@ if (failed == 0 && args.Length == 2 && args[0] == "--renpy-fixture")
     File.WriteAllText(Path.Combine(standalone, "imported_story.rpy"),
         RenpyExporter.Generate(tricky, new ExportOptions { CreateStartLabel = true }, [fixtureTree]), new UTF8Encoding(false));
     Console.WriteLine("Ren'Py start fixture: " + Path.GetDirectoryName(standalone));
+    var graphGame = Path.Combine(Path.GetFullPath(args[1]), "graph", "game");
+    Directory.CreateDirectory(graphGame);
+    var opening = Narration("入口：雨夜选择。");
+    var rain = new Segment { Text = "雨夜，你终于来了。", Speaker = "林夏", Kind = SegmentKind.Dialogue, Reviewed = true };
+    var rainEnd = Narration("雨停前，我们做出决定。");
+    var ending = Narration("共同结局：天亮了。");
+    var graph = new ProjectDocument
+    {
+        SourceText = "入口：雨夜选择。\n雨夜，你终于来了。\n雨停前，我们做出决定。\n共同结局：天亮了。",
+        Segments = [opening, rain, rainEnd, ending], Export = new ExportOptions { CreateStartLabel = true }
+    };
+    var rainFragment = StoryFragmentEditor.Stash(graph, [rain.Id, rainEnd.Id], "雨夜路线");
+    var echo = new StoryFragment { Title = "回声路线", Segments = [Narration("回声路线：另一条分支。")] , NextNodeId = ending.Id };
+    graph.Fragments.Add(echo);
+    ChoiceTreeEditor.AddQuickChoice(graph, "进入雨夜", opening.Id).Branch.TargetNodeId = rainFragment.Id;
+    ChoiceTreeEditor.AddQuickChoice(graph, "直接结局", opening.Id).Branch.TargetNodeId = ending.Id;
+    ChoiceTreeEditor.AddQuickChoice(graph, "重新开始", opening.Id).Branch.TargetNodeId = opening.Id;
+    rainFragment.ChoiceTrees.Add(new ChoiceTree
+    {
+        AnchorSegmentId = rainEnd.Id,
+        Branches = [new ChoiceBranch { Label = "前往回声", TargetNodeId = echo.Id }, new ChoiceBranch { Label = "回到主线", TargetNodeId = ending.Id }]
+    });
+    File.WriteAllText(Path.Combine(graphGame, "imported_story.rpy"),
+        RenpyExporter.Generate(graph.Segments, graph.Export, graph.ChoiceTrees, graph.Fragments), new UTF8Encoding(false));
+    ProjectStorage.Save(Path.Combine(Path.GetFullPath(args[1]), "graph-project.jumu"), graph);
+    foreach (var harness in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "RenpyGraph"), "*.rpy"))
+        File.Copy(harness, Path.Combine(graphGame, Path.GetFileName(harness)), overwrite: true);
+    Console.WriteLine("Ren'Py graph fixture: " + Path.GetDirectoryName(graphGame));
 }
 return failed == 0 ? 0 : 1;
 
