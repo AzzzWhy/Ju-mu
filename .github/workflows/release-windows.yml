@@ -1,25 +1,67 @@
-name: Publish Windows release
+name: Build and publish release
 
 on:
   push:
-    tags:
-      - v0.3.2
+    tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Publish Windows ZIP and checksum
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run core tests
+        run: dotnet run --project tests/Scribe.Tests -c Release
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          dotnet publish src/Scribe.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o dist/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Windows publish failed' }
+          Copy-Item LICENSE,THIRD-PARTY-NOTICES.md dist/windows/
+          Copy-Item packaging/windows/README-zh.md dist/windows/README-zh.md
+          New-Item -ItemType Directory -Force dist/packages | Out-Null
+          Compress-Archive -Path dist/windows/* -DestinationPath "dist/packages/Jumu-$version-win-x64.zip"
+      - name: Package Mac
+        if: runner.os == 'macOS'
+        run: |
+          bash build-macos.sh
+          mkdir -p dist/packages
+          cp dist/macos-arm64/*.zip dist/packages/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ runner.os }}
+          path: dist/packages/*.zip
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist/packages
+      - name: Publish packages and checksums
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            'packages/Jumu-0.3.2-win-x64.zip#Jumu 0.3.2 for Windows x64' \
-            'packages/SHA256SUMS.txt#SHA-256 checksums' \
-            --title '句幕 Jumu 0.3.2' \
-            --notes 'Windows x64: extract the ZIP and run RenpyScribe.exe. The archive passed integrity checks and the application was cross-built, but it has not yet been run on a physical Windows machine.' \
-            --verify-tag
+          version="${GITHUB_REF_NAME#v}"
+          cd dist/packages
+          sha256sum *.zip > "SHA256SUMS-$version.txt"
+          gh release create "$GITHUB_REF_NAME" *.zip "SHA256SUMS-$version.txt" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "句幕 Jumu $version" \
+            --notes-file "../../packaging/release-$version.md"

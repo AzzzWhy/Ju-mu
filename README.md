@@ -33,9 +33,9 @@
 
 「应用素材袋」/「应用选项树」写回当前工程，仍需保存 `.jumu`；取消不会写回。移动保留句子身份与关联菜单，被跳转引用的句子/片段不可直接删除，应先解除连接。0.4.0 保存使用工程格式 2，可读取旧工程，但旧版应用不能读取新格式，请保留工程备份。
 
-当前版本为 **0.4.4**，新增 RPY 反向导入，保留完整文本素材袋、多选/右键删除、常驻删除按钮和折叠跳转目标。旧版本仍可在 [Releases](https://github.com/AzzzWhy/Ju-mu/releases) 中下载。
+当前版本为 **0.4.5**，新增关闭时自动保存与启动恢复，保留 RPY 反向导入，保留完整文本素材袋、多选/右键删除、常驻删除按钮和折叠跳转目标。旧版本仍可在 [Releases](https://github.com/AzzzWhy/Ju-mu/releases) 中下载。
 
-Windows x64 压缩包：[下载 Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-mac-arm64.zip)。校验值见 [SHA256SUMS-0.4.4.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/SHA256SUMS-0.4.4.txt)。Windows 版尚未在真实 Windows 电脑及 Ren’Py 8.5.3 中实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
+Windows x64 压缩包：[下载 Jumu 0.4.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/Jumu-0.4.5-win-x64.zip)（解压后运行 `Jumu.exe`）。Apple Silicon Mac 压缩包：[下载 Jumu 0.4.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/Jumu-0.4.5-mac-arm64.zip)。校验值见 [SHA256SUMS-0.4.5.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/SHA256SUMS-0.4.5.txt)。Windows 版尚未在真实 Windows 电脑及 Ren’Py 8.5.3 中实机验证；Mac 版仅有本地 ad-hoc 签名，未经 Apple 公证。
 
 句幕使用离线规则辅助识别，**不会自动理解所有语境**。复杂引述、省略的说话人及分支内容仍需人工检查；立绘、背景、音效等演出资源也不会自动生成。
 

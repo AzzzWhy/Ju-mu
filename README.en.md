@@ -20,9 +20,11 @@ Jumu is an offline desktop tool for visual novel creators. Import a TXT, DOCX, o
 
 ## Basic workflow
 
+Closing the main window automatically saves the current project; the next normal launch restores source text, corrections, the text bag, menus, and export settings. Save Project still writes a separate `.jumu` file for backups or sharing. Apply changes in bag/menu dialogs first. Recovery covers normal closing, not crashes or power loss.
+
 Import or paste a manuscript → choose a mode and parse → review the results and choice trees → export the `.rpy` file into your Ren’Py project’s `game` folder. If the project already has `label start`, add `call imported_story` (or your configured story label) there. For a new project without `start`, enable startup-label generation in export settings. Jumu also checks neighboring `.rpy` scripts when exporting into `game` and prompts if a startup entry is missing.
 
-Windows x64 package: [Download Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-win-x64.zip), extract it, and run `Jumu.exe`. Apple Silicon Mac package: [Download Jumu 0.4.4](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/Jumu-0.4.4-mac-arm64.zip). Verify them against [SHA256SUMS-0.4.4.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.4/SHA256SUMS-0.4.4.txt). The Windows build has not yet been tested on a physical Windows machine or with Ren’Py 8.5.3. The Mac build is only locally ad-hoc signed and is not Apple-notarized.
+Windows x64 package: [Download Jumu 0.4.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/Jumu-0.4.5-win-x64.zip), extract it, and run `Jumu.exe`. Apple Silicon Mac package: [Download Jumu 0.4.5](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/Jumu-0.4.5-mac-arm64.zip). Verify them against [SHA256SUMS-0.4.5.txt](https://github.com/AzzzWhy/Ju-mu/releases/download/v0.4.5/SHA256SUMS-0.4.5.txt). The Windows build has not yet been tested on a physical Windows machine or with Ren’Py 8.5.3. The Mac build is only locally ad-hoc signed and is not Apple-notarized.
 
 Jumu relies on offline rules and **cannot understand every narrative context**. Complex quotations, omitted speakers, and branch content still need human review. It does not generate sprites, backgrounds, audio, or other presentation assets.
 
@@ -35,7 +37,7 @@ Jumu relies on offline rules and **cannot understand every narrative context**. 
 
 Apply the bag/tree changes, then save the `.jumu` project; Cancel discards the window's edits. Moving preserves sentence identities and attached menus. Unlink incoming jumps before deleting referenced text. Version 0.4.0 saves project format 2 and can read older projects; older apps cannot read the new format, so keep backups.
 
-The current version is **0.4.4**, adding reverse RPY import while retaining the whole-text bag, bulk/right-click deletion, persistent delete buttons, and collapsed jump destinations. Older versions remain available in [Releases](https://github.com/AzzzWhy/Ju-mu/releases).
+The current version is **0.4.5**, adding automatic save on close and restore on startup while retaining reverse RPY import and the whole-text bag, bulk/right-click deletion, persistent delete buttons, and collapsed jump destinations. Older versions remain available in [Releases](https://github.com/AzzzWhy/Ju-mu/releases).
 
 ## Build from source
 
