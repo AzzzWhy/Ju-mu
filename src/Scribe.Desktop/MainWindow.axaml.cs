@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private bool _loading, _refreshing, _dirty, _manualEdits, _sourceStale, _closingAllowed, _busy;
     private string? _motionSelectionId;
     private string? _projectPath;
+    private static readonly string SessionPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Jumu", "last-session.jumu");
     private T C<T>(string name) where T : Control => this.FindControl<T>(name)!;
     private TextBox Source => C<TextBox>("SourceBox");
     private ListBox Rows => C<ListBox>("SegmentList");
@@ -154,17 +156,33 @@ public partial class MainWindow : Window
         Closing += async (_, e) =>
         {
             if (_closingAllowed) return;
-            CommitEditor();
-            if (!_dirty) return;
             e.Cancel = true;
-            if (await Dialog("尚未保存的工程", "原文、解析结果或校正内容尚未保存。可以取消退出并点击「保存工程」。", "放弃修改并退出", "取消"))
-            { _closingAllowed = true; Close(); }
+            if (_busy) return;
+            _busy = true;
+            try
+            {
+                CaptureProject();
+                Directory.CreateDirectory(Path.GetDirectoryName(SessionPath)!);
+                ProjectStorage.Save(SessionPath, _project);
+                _closingAllowed = true;
+                Close();
+            }
+            catch (Exception ex) { await ReportError(ex); }
+            finally { _busy = false; }
         };
         Opened += async (_, _) =>
         {
-            if (Program.Arguments.Contains("--demo")) await LoadSampleAsync();
             var path = Program.Arguments.FirstOrDefault(x => !x.StartsWith("--") && File.Exists(x));
             if (path != null) await Safe(() => LoadPathAsync(path));
+            else if (Program.Arguments.Contains("--demo")) await Safe(LoadSampleAsync);
+            else if (File.Exists(SessionPath))
+                await Safe(async () =>
+                {
+                    await LoadPathAsync(SessionPath);
+                    _projectPath = null;
+                    _dirty = true;
+                    SetStatus("已恢复上次关闭时的工作。可继续编辑，或点击「保存工程」另存为 .jumu 文件。");
+                });
         };
         RefreshSpeakerChoices();
     }
@@ -745,10 +763,15 @@ public partial class MainWindow : Window
         SetProjectControls(); Refresh(); SetStatus("已撤销上一步解析或校正。"); return Task.CompletedTask;
     }
 
-    private async Task SaveAsync()
+    private void CaptureProject()
     {
         CommitEditor();
         _project.SourceText = Source.Text ?? ""; _project.Options = CurrentOptions(); _project.RequiresReparse = _sourceStale;
+    }
+
+    private async Task SaveAsync()
+    {
+        CaptureProject();
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = "保存校正工程", SuggestedFileName = _projectPath == null ? "我的剧本.jumu" : Path.GetFileName(_projectPath), DefaultExtension = "jumu", FileTypeChoices = [new("句幕工程") { Patterns = ["*.jumu"] }] });
         var path = file?.TryGetLocalPath(); if (path == null) return;
         if (!path.EndsWith(".jumu", StringComparison.OrdinalIgnoreCase)) path += ".jumu";
@@ -866,7 +889,7 @@ public partial class MainWindow : Window
         4. 点击素材卡片默认编辑完整文本；展开逐句校正可修改内部对话的角色与内容类型。空行分隔内部对话块，修改已有块保留角色/连接；可编辑本文选项树和结束后的后续节点。
         5. 素材卡片可勾选或 Ctrl（Mac Cmd）点击多选，通过右键菜单或右侧顶部按钮删除。打开「选项树」后，右侧「分支结束后」优先列出折叠的素材和当前修改文本；直接点击整份文本即可跳转，点击 ▸ 展开后可选内部位置。跳转后从目标继续剧情；未设置跳转的分支会继续当前主线。
         6. 素材袋中未连接的片段只保存为素材，不会自动导出或播放。移动节点保留连接；取回片段后，连接会转向它的第一句。被引用的目标需先调整连接再删除。
-        7. 保存 .jumu 工程保留所有节点和连接。新版可打开旧工程；素材袋工程需要 0.4.0 或更高版本。
+        7. 关闭窗口时自动保存当前工作，下次启动恢复原文、校正结果、素材袋和选项树。点击「保存工程」可另存 .jumu 文件用于备份或分享。新版可打开旧工程；素材袋工程需要 0.4.0 或更高版本。
         8. 导出 .rpy 到 Ren’Py 的 game 文件夹。已有 start 的工程在其中 call 剧情 label；没有 start 的工程可生成启动入口。目标节点的 label 与 jump 自动生成。
         9. 点击「导入 .rpy」可反向导入单个源脚本，选择入口后恢复台词、角色、menu 和静态 jump；其他剧情标签成为素材。导入会替换整个工程，可撤销。原代码保存在左侧，重读会重建整个结构，不使用小说断句。暂不支持 .rpyc、条件逻辑、动态表达式或演出语句；不会执行脚本。
 
